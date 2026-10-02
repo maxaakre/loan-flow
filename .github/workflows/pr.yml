@@ -1,5 +1,8 @@
 name: PR checks
-on: pull_request
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
 
 permissions:
   id-token: write # OIDC to AWS
@@ -23,11 +26,13 @@ jobs:
       - run: pnpm --filter @loanflow/web build
 
       - uses: aws-actions/configure-aws-credentials@v4
+        if: github.event_name == 'pull_request'
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/loanflow-github-diff
           aws-region: eu-north-1
 
       - name: cdk diff
+        if: github.event_name == 'pull_request'
         shell: bash
         working-directory: infra
         run: |
@@ -36,5 +41,6 @@ jobs:
           { echo '### cdk diff'; echo '```'; cat diff.txt; echo '```'; } > diff.md
 
       - uses: marocchino/sticky-pull-request-comment@v2
+        if: github.event_name == 'pull_request'
         with:
           path: infra/diff.md

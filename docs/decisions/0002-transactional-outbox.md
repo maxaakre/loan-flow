@@ -16,4 +16,5 @@ Pipes can read the stream, but turning a DynamoDB item into a clean event needs 
 
 ## Consequences
 - Events are at-least-once (the relay may retry). Consumers must be idempotent, see ADR 3.
+- If EventBridge is down longer than the relay's retries (10 attempts, 1 day max record age), the record goes to the DLQ (alarm). The `OUTBOX#` row (24 h TTL) is the replay source: republish by re-putting the row.
 - A small delay (usually well under a second) between the write and the event.

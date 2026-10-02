@@ -70,7 +70,35 @@ Smoke test: `pnpm exec tsx scripts/smoke.ts <SiteUrl> <ApiUrl>`.
 
 ### MCP server
 
-See Task 13 in `docs/superpowers/plans/2026-10-02-loanflow.md` for the AWS profile and the `claude mcp add` command. Then ask: *"Which applications are in manual review, and why?"*
+Add a profile to `~/.aws/config` (use the `McpReaderRoleArn` stack output; `source_profile` is the profile `aws login` writes to, usually `default`):
+
+```ini
+[profile loanflow-mcp]
+role_arn = <McpReaderRoleArn>
+source_profile = default
+region = eu-north-1
+```
+
+Then register the server with Claude Code:
+
+```bash
+API_URL=$(jq -r '.LoanFlow.ApiUrl' infra/cdk-outputs.json)
+claude mcp add loanflow -e LOANFLOW_API_URL="$API_URL" -e AWS_PROFILE=loanflow-mcp -- \
+  "$PWD/services/mcp/node_modules/.bin/tsx" "$PWD/services/mcp/src/server.ts"
+```
+
+In a new session ask: *"Which applications are in manual review, and why?"*
+
+## CI setup
+
+The PR workflow runs lint, typecheck and tests, and posts a `cdk diff`. It needs:
+
+- **GitHub variables** (Settings → Secrets and variables → Actions → Variables): `AWS_ACCOUNT_ID`, `ALERT_EMAIL`, `OFFER_TIMEOUT_SECONDS`.
+- **One-time deploy** of the OIDC role the workflow assumes (no stored AWS keys):
+
+```bash
+cd infra && pnpm exec cdk deploy LoanFlowGithubOidc
+```
 
 ## Decisions
 
