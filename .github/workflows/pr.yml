@@ -1,0 +1,40 @@
+name: PR checks
+on: pull_request
+
+permissions:
+  id-token: write # OIDC to AWS
+  contents: read
+  pull-requests: write # post the cdk diff
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm --filter @loanflow/web build
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/loanflow-github-diff
+          aws-region: eu-north-1
+
+      - name: cdk diff
+        shell: bash
+        working-directory: infra
+        run: |
+          pnpm exec cdk diff LoanFlow --no-change-set \
+            -c alertEmail=${{ vars.ALERT_EMAIL }} -c offerTimeoutSeconds=${{ vars.OFFER_TIMEOUT_SECONDS }} 2>&1 | tee diff.txt
+          { echo '### cdk diff'; echo '```'; cat diff.txt; echo '```'; } > diff.md
+
+      - uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: infra/diff.md

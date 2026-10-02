@@ -1,0 +1,43 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+
+concurrency: deploy
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm --filter @loanflow/web build
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/loanflow-github-deploy
+          aws-region: eu-north-1
+
+      - name: cdk deploy
+        working-directory: infra
+        run: |
+          pnpm exec cdk deploy LoanFlow --require-approval never \
+            -c alertEmail=${{ vars.ALERT_EMAIL }} -c offerTimeoutSeconds=${{ vars.OFFER_TIMEOUT_SECONDS }} \
+            --outputs-file cdk-outputs.json
+          echo "SITE_URL=$(jq -r '.LoanFlow.SiteUrl' cdk-outputs.json)" >> "$GITHUB_ENV"
+          echo "API_URL=$(jq -r '.LoanFlow.ApiUrl' cdk-outputs.json)" >> "$GITHUB_ENV"
+
+      - name: Smoke test
+        run: pnpm exec tsx scripts/smoke.ts "$SITE_URL" "$API_URL"

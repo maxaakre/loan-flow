@@ -1,5 +1,6 @@
 import { App } from 'aws-cdk-lib';
 import { fileURLToPath } from 'node:url';
+import { GithubOidcStack } from '../lib/github-oidc-stack';
 import { LoanFlowStack } from '../lib/loanflow-stack';
 
 const app = new App();
@@ -19,4 +20,10 @@ new LoanFlowStack(app, 'LoanFlow', {
   alertEmail: requireContext('alertEmail'),
   offerTimeoutSeconds: Number(requireContext('offerTimeoutSeconds')),
   webAssetPath: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
+});
+
+new GithubOidcStack(app, 'LoanFlowGithubOidc', {
+  env,
+  githubRepo: 'maxaakre/loan-flow',
+  githubSubjectPrefix: app.node.tryGetContext('githubSubjectPrefix'),
 });
