@@ -17,14 +17,64 @@ describe('GithubOidcStack', () => {
     expect(Object.keys(template.findResources('AWS::IAM::OIDCProvider'))).toHaveLength(0);
   });
 
-  it('deploy role trusts only the main branch and can only hop into CDK bootstrap roles', () => {
-    const roles = template.findResources('AWS::IAM::Role');
-    const deploy = Object.values(roles).find((r) => r.Properties.RoleName === 'loanflow-github-deploy')!;
-    expect(JSON.stringify(deploy.Properties.AssumeRolePolicyDocument)).toContain(
-      'repo:maxaakre@36918283/loan-flow@1401563715:ref:refs/heads/main',
+  const roles = template.findResources('AWS::IAM::Role');
+  const policies = template.findResources('AWS::IAM::Policy');
+  const prefix = 'repo:maxaakre@36918283/loan-flow@1401563715';
+  const oidc = 'token.actions.githubusercontent.com';
+
+  const roleEntry = (name: string) => {
+    const entry = Object.entries(roles).find(([, r]) => r.Properties.RoleName === name);
+    if (!entry) throw new Error(`role ${name} not found`);
+    return { id: entry[0], trust: entry[1].Properties.AssumeRolePolicyDocument.Statement as Record<string, any>[] };
+  };
+  /** Resources of every statement in the inline policies attached to the role. */
+  const policyResources = (roleId: string) =>
+    Object.values(policies)
+      .filter((p) => p.Properties.Roles.some((r: { Ref: string }) => r.Ref === roleId))
+      .flatMap((p) => p.Properties.PolicyDocument.Statement as Record<string, any>[])
+      .flatMap((st) => {
+        expect(st.Action).toBe('sts:AssumeRole');
+        expect(st.Effect).toBe('Allow');
+        return st.Resource as string[] | string;
+      });
+  const bootstrap = (name: string) => `arn:aws:iam::123456789012:role/cdk-hnb659fds-${name}-123456789012-eu-north-1`;
+
+  it('deploy role trusts only the main branch via web identity from the imported provider', () => {
+    const { trust } = roleEntry('loanflow-github-deploy');
+    expect(trust).toHaveLength(1);
+    expect(trust[0].Effect).toBe('Allow');
+    expect(trust[0].Action).toBe('sts:AssumeRoleWithWebIdentity');
+    expect(JSON.stringify(trust[0].Principal)).toContain(`oidc-provider/${oidc}`);
+    expect(Object.keys(trust[0].Principal)).toEqual(['Federated']);
+    expect(trust[0].Condition).toEqual({
+      StringEquals: {
+        [`${oidc}:aud`]: 'sts.amazonaws.com',
+        [`${oidc}:sub`]: `${prefix}:ref:refs/heads/main`,
+      },
+    });
+  });
+
+  it('deploy role can only assume the four CDK bootstrap roles', () => {
+    const resources = policyResources(roleEntry('loanflow-github-deploy').id);
+    expect([resources].flat().sort()).toEqual(
+      ['deploy-role', 'file-publishing-role', 'image-publishing-role', 'lookup-role'].map(bootstrap).sort(),
     );
-    const policies = JSON.stringify(template.findResources('AWS::IAM::Policy'));
-    expect(policies).toContain('cdk-hnb659fds-deploy-role');
-    expect(policies).not.toMatch(/"Action":"\*"/);
+    expect(JSON.stringify(policies)).not.toMatch(/"Action":"\*"/);
+  });
+
+  it('diff role trusts only pull requests and can only assume the lookup role', () => {
+    const { id, trust } = roleEntry('loanflow-github-diff');
+    expect(trust).toHaveLength(1);
+    expect(trust[0].Action).toBe('sts:AssumeRoleWithWebIdentity');
+    expect(JSON.stringify(trust[0].Principal)).toContain(`oidc-provider/${oidc}`);
+    expect(trust[0].Condition).toEqual({
+      StringEquals: {
+        [`${oidc}:aud`]: 'sts.amazonaws.com',
+        [`${oidc}:sub`]: `${prefix}:pull_request`,
+      },
+    });
+    const resources = policyResources(id);
+    expect([resources].flat()).toEqual([bootstrap('lookup-role')]);
+    expect(JSON.stringify(resources)).not.toContain('deploy-role');
   });
 });
