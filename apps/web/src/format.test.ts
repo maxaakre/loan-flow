@@ -1,5 +1,6 @@
 import { kr } from '@loanflow/core';
-import { toOre } from './format';
+import { ApiError } from './api';
+import { errorMessage, toOre } from './format';
 
 describe('toOre (Review Focus 5)', () => {
   it('accepts whole kronor with spaces', () => {
@@ -16,5 +17,12 @@ describe('toOre (Review Focus 5)', () => {
   it('rejects absurdly long input without throwing', () => {
     expect(() => toOre('99999999999999999999')).not.toThrow();
     expect(toOre('99999999999999999999').ok).toBe(false);
+  });
+});
+
+describe('errorMessage', () => {
+  it('shows the API detail, or one Swedish fallback for anything else', () => {
+    expect(errorMessage(new ApiError(409, 'Erbjudandet har gått ut'))).toBe('Erbjudandet har gått ut');
+    expect(errorMessage('boom')).toBe('Något gick fel. Försök igen.');
   });
 });

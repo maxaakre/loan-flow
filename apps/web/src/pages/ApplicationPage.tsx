@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router';
 import { api } from '../api';
 import { OfferCard } from '../components/OfferCard';
 import { Timeline } from '../components/Timeline';
+import { errorMessage } from '../format';
 import { useActionKey } from '../useActionKey';
 import { usePolling } from '../usePolling';
 
@@ -28,7 +29,7 @@ export function ApplicationPage() {
     try {
       await api.sign(id, signAction.key());
     } catch (err) {
-      setSignError(err instanceof Error ? err.message : 'Något gick fel.');
+      setSignError(errorMessage(err));
       setSigning(false);
     }
   }

@@ -1,4 +1,5 @@
 import type { LedgerEntry, Loan, Ore, PublicApplication, TermMonths, TimelineItem } from '@loanflow/core';
+import { GENERIC_ERROR } from './format';
 
 export type CompanyOption = { orgNr: string; name: string };
 
@@ -20,7 +21,7 @@ async function request<T>(path: string, init: { method?: string; body?: unknown;
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
   const body = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(res.status, body?.detail ?? 'Något gick fel. Försök igen.');
+  if (!res.ok) throw new ApiError(res.status, body?.detail ?? GENERIC_ERROR);
   return body as T;
 }
 

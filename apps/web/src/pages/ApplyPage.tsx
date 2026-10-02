@@ -2,7 +2,7 @@ import { TERMS, type TermMonths } from '@loanflow/core';
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { api, type CompanyOption } from '../api';
-import { toOre } from '../format';
+import { errorMessage, toOre } from '../format';
 import { useActionKey } from '../useActionKey';
 
 export function ApplyPage() {
@@ -39,7 +39,7 @@ export function ApplyPage() {
       action.reset();
       navigate(`/applications/${id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Något gick fel.');
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }

@@ -14,3 +14,7 @@ export function toOre(input: string): { ok: true; value: Ore } | { ok: false; er
 
 export const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+export const GENERIC_ERROR = 'Något gick fel. Försök igen.';
+/** A message we can show the user: API errors carry a Swedish detail, anything else gets the fallback. */
+export const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : GENERIC_ERROR);

@@ -2,6 +2,7 @@ import { formatKr } from '@loanflow/core';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { api } from '../api';
+import { errorMessage } from '../format';
 import { useActionKey } from '../useActionKey';
 import { usePolling } from '../usePolling';
 
@@ -32,7 +33,7 @@ export function LoanPage() {
       payAction.reset(); // the next click is a new payment
       refresh();
     } catch (err) {
-      setPayError(err instanceof Error ? err.message : 'Något gick fel.');
+      setPayError(errorMessage(err));
     } finally {
       setPaying(false);
     }

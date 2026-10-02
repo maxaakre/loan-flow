@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { errorMessage } from './format';
 
 /**
  * Polls `load` every `intervalMs`. Polling is a deliberate free-tier choice;
@@ -30,7 +31,7 @@ export function usePolling<T>(load: () => Promise<T>, intervalMs: number, stopWh
         if (extraPolls !== undefined) extraPolls += 1;
         else if (stopRef.current?.(value)) extraPolls = 0;
       } catch (err) {
-        if (alive) setError(err instanceof Error ? err.message : 'Något gick fel.');
+        if (alive) setError(errorMessage(err));
       }
       if (alive && (extraPolls ?? 0) < EXTRA_POLLS) timer = setTimeout(run, intervalMs);
     };
