@@ -18,6 +18,7 @@ export const REASON_CODES = [
   'AMOUNT_ABOVE_AUTO_LIMIT',
   'LOW_CASHFLOW',
   'REGISTRY_UNAVAILABLE',
+  'PROCESS_FAILED',
 ] as const;
 export type ReasonCode = (typeof REASON_CODES)[number];
 

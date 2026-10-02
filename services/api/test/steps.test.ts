@@ -166,6 +166,26 @@ describe('set-status', () => {
     });
   });
 
+  it.each(['OFFERED', 'SIGNED'] as const)('marks MANUAL_REVIEW with PROCESS_FAILED from %s', async (status) => {
+    stored(anApplication({ status, taskToken: 'tok' }));
+    ddb.on(TransactWriteCommand).resolves({});
+    await setStatus({ applicationId: APP_ID, status: 'MANUAL_REVIEW', reason: 'PROCESS_FAILED' });
+    const items = lastTransaction(ddb);
+    expect(Object.values(items[0]!.Update!.ExpressionAttributeValues!)).toContain('MANUAL_REVIEW');
+    expect(outboxEvents(items)[0]).toMatchObject({ type: 'ApplicationSentToManualReview', data: { reason: 'PROCESS_FAILED' } });
+  });
+
+  it.each(['DISBURSED', 'DECLINED', 'EXPIRED'] as const)(
+    'treats MANUAL_REVIEW on a final %s application as a no-op, so the failure path never fails',
+    async (status) => {
+      stored(anApplication({ status }));
+      expect(await setStatus({ applicationId: APP_ID, status: 'MANUAL_REVIEW', reason: 'PROCESS_FAILED' })).toEqual({
+        applicationId: APP_ID,
+      });
+      expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
+    },
+  );
+
   it('is a no-op when the status is already set', async () => {
     stored(anApplication({ status: 'EXPIRED' }));
     await setStatus({ applicationId: APP_ID, status: 'EXPIRED' });

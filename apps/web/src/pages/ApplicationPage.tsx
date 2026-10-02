@@ -12,6 +12,7 @@ const REASON_SV: Record<string, string> = {
   BANKRUPTCY: 'Företaget är i konkurs.',
   COMPANY_TOO_YOUNG: 'Företaget är yngre än 6 månader.',
   LOW_CASHFLOW: 'Kassaflödet räcker inte för beloppet.',
+  PROCESS_FAILED: 'Något gick fel i handläggningen.',
 };
 
 const FINAL_STATUSES = new Set(['DISBURSED', 'DECLINED', 'EXPIRED', 'MANUAL_REVIEW']);

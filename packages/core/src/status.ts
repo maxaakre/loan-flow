@@ -13,8 +13,9 @@ export type ApplicationStatus = (typeof APPLICATION_STATUSES)[number];
 const ALLOWED: Record<ApplicationStatus, readonly ApplicationStatus[]> = {
   SUBMITTED: ['ASSESSING', 'MANUAL_REVIEW'],
   ASSESSING: ['OFFERED', 'DECLINED', 'MANUAL_REVIEW'],
-  OFFERED: ['SIGNED', 'EXPIRED'],
-  SIGNED: ['DISBURSED'],
+  // MANUAL_REVIEW from OFFERED/SIGNED is the process's catch-all when a step fails for good
+  OFFERED: ['SIGNED', 'EXPIRED', 'MANUAL_REVIEW'],
+  SIGNED: ['DISBURSED', 'MANUAL_REVIEW'],
   DISBURSED: [],
   DECLINED: [],
   EXPIRED: [],

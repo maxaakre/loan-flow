@@ -104,6 +104,26 @@ describe('loan process', () => {
     expect(wait.Catch).toContainEqual(expect.objectContaining({ ErrorEquals: ['States.Timeout'], Next: 'Mark expired' }));
   });
 
+  it.each(['Fetch company', 'Assess credit', 'Create offer and wait for signature', 'Mark signed', 'Disburse loan'])(
+    '%s sends any unhandled failure to manual review',
+    (name) => {
+      const catches: State[] = states()[name]!.Catch;
+      expect(catches.at(-1)).toMatchObject({ ErrorEquals: ['States.ALL'], Next: 'Mark process failed', ResultPath: '$.error' });
+    },
+  );
+
+  it('checks the offer timeout before the catch-all', () => {
+    const catches: State[] = states()['Create offer and wait for signature']!.Catch;
+    expect(catches[0]!.ErrorEquals).toEqual(['States.Timeout']);
+  });
+
+  it('marks a failed process as MANUAL_REVIEW with PROCESS_FAILED and ends there', () => {
+    const failed = states()['Mark process failed']!;
+    expect(failed.Parameters).toMatchObject({ status: 'MANUAL_REVIEW', reason: 'PROCESS_FAILED' });
+    expect(failed.Catch).toBeUndefined();
+    expect(states()[failed.Next]!.Type).toBe('Succeed');
+  });
+
   it('passes the signing time on to the status update', () => {
     expect(states()['Mark signed']!.Parameters['signedAt.$']).toBe('$.signature.signedAt');
   });

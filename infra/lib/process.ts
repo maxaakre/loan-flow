@@ -43,6 +43,13 @@ export class ProcessConstruct extends Construct {
         resultPath: sfn.JsonPath.DISCARD,
       }).addRetry(conflictRetry);
 
+    // Any step that still fails after its retries ends here, so no application is left stuck in a
+    // half-done status. A failed disburse may already have a bank payout: a human must check that anyway.
+    const processFailed = setStatus('Mark process failed', { status: 'MANUAL_REVIEW', reason: 'PROCESS_FAILED' }).next(
+      new sfn.Succeed(this, 'Needs manual review'),
+    );
+    const failedCatch = { errors: ['States.ALL'], resultPath: '$.error' };
+
     // 1. Company data. The registry can be down: retry with backoff + jitter, then a human looks at it.
     const fetchCompany = new tasks.LambdaInvoke(this, 'Fetch company', {
       lambdaFunction: fetchCompanyFn,
@@ -63,12 +70,15 @@ export class ProcessConstruct extends Construct {
       ),
       { errors: ['RegistryUnavailableError'], resultPath: '$.error' },
     );
+    fetchCompany.addCatch(processFailed, failedCatch);
 
     // 2. Credit decision → { applicationId, outcome }
     const assessCredit = new tasks.LambdaInvoke(this, 'Assess credit', {
       lambdaFunction: assessCreditFn,
       payloadResponseOnly: true,
-    }).addRetry(conflictRetry);
+    })
+      .addRetry(conflictRetry)
+      .addCatch(processFailed, failedCatch);
 
     // 3. Offer, then wait for the customer. The token completes once: signed OR timed out.
     const offerAndWait = new tasks.LambdaInvoke(this, 'Create offer and wait for signature', {
@@ -86,13 +96,16 @@ export class ProcessConstruct extends Construct {
       errors: ['States.Timeout'],
       resultPath: '$.error',
     });
+    offerAndWait.addCatch(processFailed, failedCatch); // after States.Timeout: catchers match in order
 
     // 4. Payout. Safe to retry: the bank call is idempotent on the application id.
     const disburse = new tasks.LambdaInvoke(this, 'Disburse loan', {
       lambdaFunction: disburseFn,
       payloadResponseOnly: true,
       resultPath: sfn.JsonPath.DISCARD,
-    }).addRetry({ errors: ['States.ALL'], interval: Duration.seconds(2), backoffRate: 2, maxAttempts: 3, jitterStrategy: sfn.JitterType.FULL });
+    })
+      .addRetry({ errors: ['States.ALL'], interval: Duration.seconds(2), backoffRate: 2, maxAttempts: 3, jitterStrategy: sfn.JitterType.FULL })
+      .addCatch(processFailed, failedCatch);
 
     const approved = sfn.Condition.or(
       sfn.Condition.stringEquals('$.outcome', 'APPROVED'),
@@ -105,7 +118,12 @@ export class ProcessConstruct extends Construct {
           .when(
             approved,
             offerAndWait
-              .next(setStatus('Mark signed', { status: 'SIGNED', signedAt: sfn.JsonPath.stringAt('$.signature.signedAt') }))
+              .next(
+                setStatus('Mark signed', { status: 'SIGNED', signedAt: sfn.JsonPath.stringAt('$.signature.signedAt') }).addCatch(
+                  processFailed,
+                  failedCatch,
+                ),
+              )
               .next(disburse)
               .next(new sfn.Succeed(this, 'Disbursed')),
           )

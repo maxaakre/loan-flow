@@ -12,4 +12,5 @@ A loan application has steps that must happen in order, can wait for days (signi
 ## Consequences
 - You can see where every application is in the Step Functions console.
 - Adding a consumer is a new rule + queue + Lambda. The process does not change.
+- Every step that still fails after its retries is caught (`States.ALL`) and sets `MANUAL_REVIEW` with reason `PROCESS_FAILED`. No application is left stuck in `ASSESSING`, `OFFERED` or `SIGNED`; a human picks it up. A failed payout may already have reached the bank, so a human is the right next step there too.
 - Two patterns to understand instead of one. I think that is the right price: pure choreography makes "where is application X?" hard to answer, and pure orchestration couples every consumer to the process.
