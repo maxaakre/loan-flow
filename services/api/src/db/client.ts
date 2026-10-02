@@ -21,6 +21,14 @@ export class ConditionFailedError extends Error {
   }
 }
 
+/** DynamoDB aborted the transaction because another write touched the same item. Safe to retry. */
+export class TransactionConflictError extends Error {
+  override name = 'TransactionConflictError';
+  constructor() {
+    super('Transaction conflicted with a concurrent write');
+  }
+}
+
 export const isConditionalFailure = (err: unknown): boolean =>
   err instanceof Error && err.name === 'ConditionalCheckFailedException';
 
@@ -33,6 +41,7 @@ export async function transact(items: TransactItem[]): Promise<void> {
       const reasons = (err as { CancellationReasons?: { Code?: string }[] }).CancellationReasons ?? [];
       const failed = reasons.flatMap((r, i) => (r.Code === 'ConditionalCheckFailed' ? [i] : []));
       if (failed.length > 0) throw new ConditionFailedError(failed);
+      if (reasons.some((r) => r.Code === 'TransactionConflict')) throw new TransactionConflictError();
     }
     throw err;
   }

@@ -1,6 +1,6 @@
 import { SendTaskSuccessCommand, SFNClient } from '@aws-sdk/client-sfn';
 import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
-import { kr } from '@loanflow/core';
+import { assess, findCompany, kr } from '@loanflow/core';
 import { mockClient } from 'aws-sdk-client-mock';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handler } from '../src/handlers/applications-api';
@@ -13,6 +13,11 @@ beforeEach(() => {
   ddb.reset();
   sfn.reset();
 });
+
+const companyInput = (orgNr: string) => {
+  const { ageMonths, avgMonthlyInflow, paymentRemarks, bankrupt } = findCompany(orgNr)!;
+  return { ageMonths, avgMonthlyInflow, paymentRemarks, bankrupt };
+};
 
 const KEY = { 'idempotency-key': 'key-0000000001' };
 const create = (body: unknown, headers: Record<string, string> = KEY) =>
@@ -91,6 +96,16 @@ describe('GET /api/applications/{id}', () => {
     expect(res.status).toBe(200);
     expect(res.body).not.toHaveProperty('taskToken');
     expect(res.body).not.toHaveProperty('PK');
+  });
+
+  it('does not expose company credit data or decision inputs', async () => {
+    const company = companyInput('559900-0002');
+    const decision = assess(company, { amount: kr(200_000), termMonths: 12 });
+    ddb.on(GetCommand).resolves({ Item: { PK: 'APP#x', SK: 'META', ...anApplication({ status: 'OFFERED', company, decision }) } });
+    const res = await get();
+    expect(res.body).not.toHaveProperty('company');
+    expect(res.body).toHaveProperty('decision.outcome');
+    expect(res.body.decision).not.toHaveProperty('inputs');
   });
 });
 

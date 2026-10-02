@@ -3,7 +3,7 @@ import { instalmentEntry, makeEvent, nextInstalment, subOre, type DomainEvent, t
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { ulid } from 'ulid';
 import { eventMeta } from '../db/applications';
-import { ConditionFailedError, transact } from '../db/client';
+import { ConditionFailedError, TransactionConflictError, transact } from '../db/client';
 import { checkIdempotency, idempotencyPut, replayOrThrow } from '../db/idempotency';
 import { getLoan, listLedger, putLedgerEntry, updateLoan } from '../db/loans';
 import { outboxPut } from '../db/outbox';
@@ -65,9 +65,11 @@ async function pay(event: APIGatewayProxyEventV2, ctx: RequestContext): Promise<
   try {
     await transact(items);
   } catch (err) {
+    const concurrent = () => new HttpError(409, 'Concurrent update', 'Lånet ändrades samtidigt. Försök igen.');
+    if (err instanceof TransactionConflictError) throw concurrent();
     const idempotencyIndex = items.length - 1;
     if (err instanceof ConditionFailedError && !err.failedIndexes.includes(idempotencyIndex)) {
-      throw new HttpError(409, 'Concurrent update', 'Lånet ändrades samtidigt. Försök igen.');
+      throw concurrent();
     }
     return replayOrThrow(key, hash, err);
   }

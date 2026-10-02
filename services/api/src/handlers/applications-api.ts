@@ -7,7 +7,7 @@ import {
   MIN_AMOUNT,
   OreSchema,
   TERMS,
-  toPublicApplication,
+  toCustomerApplication,
   type Application,
 } from '@loanflow/core';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
@@ -84,7 +84,7 @@ async function create(event: APIGatewayProxyEventV2, ctx: RequestContext): Promi
 async function get(event: APIGatewayProxyEventV2): Promise<HttpResult> {
   const app = await getApplication(pathId(event));
   if (!app) throw notFound();
-  return { status: 200, body: toPublicApplication(app) };
+  return { status: 200, body: toCustomerApplication(app) };
 }
 
 async function events(event: APIGatewayProxyEventV2): Promise<HttpResult> {

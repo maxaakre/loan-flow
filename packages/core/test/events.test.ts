@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toPublicApplication, type Application } from '../src/domain';
+import { toCustomerApplication, toPublicApplication, type Application } from '../src/domain';
 import { makeEvent, parseEvent, summarize } from '../src/events';
 import { kr } from '../src/money';
 
@@ -46,5 +46,21 @@ describe('toPublicApplication', () => {
   it('never exposes the task token (Review Focus 3)', () => {
     const app = { id: 'A', taskToken: 'secret' } as Application;
     expect(toPublicApplication(app)).not.toHaveProperty('taskToken');
+  });
+});
+
+describe('toCustomerApplication', () => {
+  it('omits the task token, company data and decision inputs but keeps the outcome', () => {
+    const app = {
+      id: 'A',
+      taskToken: 'secret',
+      company: { orgNr: '1' },
+      decision: { outcome: 'APPROVED', reasons: [], rulesVersion: 'v1', riskBand: 'A', approvedAmount: 100, inputs: { x: 1 } },
+    } as unknown as Application;
+    const out = toCustomerApplication(app);
+    expect(out).not.toHaveProperty('taskToken');
+    expect(out).not.toHaveProperty('company');
+    expect(out.decision).not.toHaveProperty('inputs');
+    expect(out.decision).toEqual({ outcome: 'APPROVED', reasons: [], rulesVersion: 'v1', riskBand: 'A', approvedAmount: 100 });
   });
 });

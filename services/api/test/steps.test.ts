@@ -124,6 +124,18 @@ describe('create-offer', () => {
     expect(outboxEvents(items).map((e) => e.type)).toEqual(['OfferCreated']);
   });
 
+  it('measures the offer deadline from when Step Functions entered the wait', async () => {
+    const company = companyInput('559900-0002');
+    const decision = assess(company, { amount: kr(200_000), termMonths: 12 });
+    stored(anApplication({ status: 'ASSESSING', orgNr: '559900-0002', company, decision }));
+    ddb.on(TransactWriteCommand).resolves({});
+    const enteredAt = '2026-10-02T09:00:00.000Z';
+    await createOffer({ applicationId: APP_ID, taskToken: 'tok-1', enteredAt });
+    const values = Object.values(lastTransaction(ddb)[0]!.Update!.ExpressionAttributeValues!);
+    const expected = new Date(Date.parse(enteredAt) + Number(process.env.OFFER_TIMEOUT_SECONDS ?? 604_800) * 1000).toISOString();
+    expect(values).toContain(expected);
+  });
+
   it('only swaps the token when the offer already exists (retry with a new token)', async () => {
     stored(anApplication({ status: 'OFFERED', taskToken: 'old' }));
     ddb.on(TransactWriteCommand).resolves({});

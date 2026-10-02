@@ -30,6 +30,18 @@ export function toPublicApplication(app: Application): PublicApplication {
   return rest;
 }
 
+/** What a customer may see: no task token, no company credit data, no decision inputs. */
+export type CustomerApplication = Omit<Application, 'taskToken' | 'company' | 'decision'> & {
+  decision?: Omit<Decision, 'inputs'>;
+};
+
+export function toCustomerApplication(app: Application): CustomerApplication {
+  const { taskToken: _token, company: _company, decision, ...rest } = app;
+  if (!decision) return rest;
+  const { inputs: _inputs, ...safeDecision } = decision;
+  return { ...rest, decision: safeDecision };
+}
+
 export type LoanStatus = 'ACTIVE' | 'REPAID';
 
 /** The loan id is the application id. */

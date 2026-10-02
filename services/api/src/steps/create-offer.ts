@@ -6,8 +6,11 @@ import { loadApplication, nowIso, type StepInput } from './common';
 
 const offerTimeoutMs = () => Number(process.env.OFFER_TIMEOUT_SECONDS ?? 604_800) * 1000;
 
-/** Invoked with .waitForTaskToken: the process pauses until someone signs or the offer times out. */
-export const handler = async ({ applicationId, taskToken }: StepInput & { taskToken: string }): Promise<void> => {
+/**
+ * Invoked with .waitForTaskToken: the process pauses until someone signs or the offer times out.
+ * `enteredAt` is when Step Functions started the wait, so the stored deadline matches the task timeout.
+ */
+export const handler = async ({ applicationId, taskToken, enteredAt }: StepInput & { taskToken: string; enteredAt?: string }): Promise<void> => {
   const app = await loadApplication(applicationId);
   const now = nowIso();
 
@@ -22,7 +25,7 @@ export const handler = async ({ applicationId, taskToken }: StepInput & { taskTo
   }
 
   const offer = buildOffer(approvedAmount, app.termMonths, app.decision.riskBand);
-  const offerExpiresAt = new Date(Date.parse(now) + offerTimeoutMs()).toISOString();
+  const offerExpiresAt = new Date(Date.parse(enteredAt ?? now) + offerTimeoutMs()).toISOString();
   const { item, next } = updateApplication(app, { status: 'OFFERED', offer, offerExpiresAt, taskToken }, now);
   const created = makeEvent('OfferCreated', eventMeta(next, now), {
     amount: offer.amount,

@@ -4,7 +4,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { updateLoan } from '../src/db/loans';
 import { updateApplication } from '../src/db/applications';
-import { ConditionFailedError, transact } from '../src/db/client';
+import { ConditionFailedError, TransactionConflictError, transact } from '../src/db/client';
 import { checkIdempotency } from '../src/db/idempotency';
 import { outboxPut } from '../src/db/outbox';
 import { HttpError } from '../src/http';
@@ -23,6 +23,19 @@ describe('transact', () => {
     const result = transact([]);
     await expect(result).rejects.toBeInstanceOf(ConditionFailedError);
     await expect(result).rejects.toMatchObject({ failedIndexes: [1] });
+  });
+});
+
+describe('transact conflicts', () => {
+  it('reports a TransactionConflict as a retryable TransactionConflictError', async () => {
+    const err = Object.assign(new Error('cancelled'), {
+      name: 'TransactionCanceledException',
+      CancellationReasons: [{ Code: 'TransactionConflict' }, { Code: 'None' }],
+    });
+    ddb.on(TransactWriteCommand).rejects(err);
+    const result = transact([]);
+    await expect(result).rejects.toBeInstanceOf(TransactionConflictError);
+    await expect(result).rejects.toMatchObject({ name: 'TransactionConflictError' });
   });
 });
 
