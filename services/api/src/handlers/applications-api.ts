@@ -105,8 +105,14 @@ async function sign(event: APIGatewayProxyEventV2, ctx: RequestContext): Promise
   const check = await checkIdempotency(key, hash);
   if (check.kind === 'replay') return check.result;
 
+  const accepted: HttpResult = { status: 202, body: { id, status: 'SIGNING' } };
   const app = await getApplication(id);
   if (!app) throw notFound();
+  // A retry after a lost response must succeed: the earlier sign already went through.
+  if (app.status === 'SIGNED' || app.status === 'DISBURSED') {
+    await rememberResult(key, hash, accepted);
+    return accepted;
+  }
   if (app.status === 'EXPIRED') throw new HttpError(409, 'Offer expired', EXPIRED);
   if (app.status !== 'OFFERED' || !app.taskToken) {
     throw new HttpError(409, 'Offer not signable', 'Erbjudandet kan inte signeras.');
@@ -117,13 +123,15 @@ async function sign(event: APIGatewayProxyEventV2, ctx: RequestContext): Promise
       new SendTaskSuccessCommand({ taskToken: app.taskToken, output: JSON.stringify({ signedAt: ctx.now.toISOString() }) }),
     );
   } catch (err) {
-    if (err instanceof Error && TOKEN_GONE.has(err.name)) throw new HttpError(409, 'Offer expired', EXPIRED);
-    throw err;
+    if (!(err instanceof Error && TOKEN_GONE.has(err.name))) throw err;
+    // The token is also gone when an earlier sign consumed it and the status write is still pending.
+    // Before the offer expires that is the only possible cause, so treat it as already signed.
+    const stillValid = app.offerExpiresAt !== undefined && ctx.now.getTime() < Date.parse(app.offerExpiresAt);
+    if (!stillValid) throw new HttpError(409, 'Offer expired', EXPIRED);
   }
 
-  const result: HttpResult = { status: 202, body: { id, status: 'SIGNING' } };
-  await rememberResult(key, hash, result);
-  return result;
+  await rememberResult(key, hash, accepted);
+  return accepted;
 }
 
 type Route = (event: APIGatewayProxyEventV2, ctx: RequestContext) => Promise<HttpResult>;

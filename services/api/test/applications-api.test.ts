@@ -65,6 +65,7 @@ describe('POST /api/applications', () => {
   it('rejects unknown companies', async () => {
     ddb.on(GetCommand).resolves({});
     expect((await create({ ...validBody, orgNr: '556000-0000' })).status).toBe(422);
+    expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
   });
 
   it('rejects amounts outside 10 000 – 2 000 000 kr and decimals', async () => {
@@ -109,7 +110,14 @@ describe('GET /api/applications/{id}/events', () => {
 });
 
 describe('POST /api/applications/{id}/sign', () => {
-  const offered = () => ({ Item: anApplication({ status: 'OFFERED', taskToken: 'tok-1' }) });
+  const FUTURE = '2999-01-01T00:00:00.000Z';
+  const PAST = '2000-01-01T00:00:00.000Z';
+  const offered = (offerExpiresAt: string = FUTURE) => ({
+    Item: anApplication({ status: 'OFFERED', taskToken: 'tok-1', offerExpiresAt }),
+  });
+  const withApp = (item: unknown) =>
+    ddb.on(GetCommand).callsFake(async (input) => (input.Key.PK.startsWith('IDEMP#') ? {} : item));
+  const timedOut = () => sfn.on(SendTaskSuccessCommand).rejects(Object.assign(new Error('x'), { name: 'TaskTimedOut' }));
 
   it('hands the signature to Step Functions and answers 202', async () => {
     ddb.on(GetCommand).callsFake(async (input) => (input.Key.PK.startsWith('IDEMP#') ? {} : offered()));
@@ -122,8 +130,8 @@ describe('POST /api/applications/{id}/sign', () => {
   });
 
   it('returns 409 when Step Functions says TaskTimedOut (Review Focus 2)', async () => {
-    ddb.on(GetCommand).callsFake(async (input) => (input.Key.PK.startsWith('IDEMP#') ? {} : offered()));
-    sfn.on(SendTaskSuccessCommand).rejects(Object.assign(new Error('timed out'), { name: 'TaskTimedOut' }));
+    withApp(offered(PAST));
+    timedOut();
     const res = await sign();
     expect(res).toMatchObject({ status: 409, body: { detail: 'Erbjudandet har gått ut' } });
   });
@@ -135,5 +143,51 @@ describe('POST /api/applications/{id}/sign', () => {
     const res = await sign();
     expect(res).toMatchObject({ status: 409, body: { detail: 'Erbjudandet har gått ut' } });
     expect(sfn.commandCalls(SendTaskSuccessCommand)).toHaveLength(0);
+  });
+
+  it('replays the stored answer without calling Step Functions', async () => {
+    const hash = (await import('../src/http')).requestHash({ route: 'POST /api/applications/{id}/sign', id: APP_ID });
+    const stored = { status: 202, body: { id: APP_ID, status: 'SIGNING' } };
+    ddb.on(GetCommand).resolves({ Item: { requestHash: hash, result: stored } });
+    expect(await sign()).toMatchObject(stored);
+    expect(sfn.commandCalls(SendTaskSuccessCommand)).toHaveLength(0);
+  });
+
+  it('requires an Idempotency-Key', async () => {
+    const res = parse(
+      await handler(apiEvent({ routeKey: 'POST /api/applications/{id}/sign', pathParameters: { id: APP_ID } }), lambdaContext),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a key reused for a different application', async () => {
+    ddb.on(GetCommand).resolves({ Item: { requestHash: 'other-hash', result: { status: 202, body: {} } } });
+    expect((await sign()).status).toBe(422);
+  });
+
+  it('answers 202 without calling Step Functions when already signed', async () => {
+    withApp({ Item: anApplication({ status: 'SIGNED' }) });
+    ddb.on(PutCommand).resolves({});
+    expect(await sign()).toMatchObject({ status: 202, body: { id: APP_ID, status: 'SIGNING' } });
+    expect(sfn.commandCalls(SendTaskSuccessCommand)).toHaveLength(0);
+  });
+
+  it('treats TaskTimedOut before offerExpiresAt as an earlier sign still being processed', async () => {
+    withApp(offered(FUTURE));
+    ddb.on(PutCommand).resolves({});
+    timedOut();
+    expect(await sign()).toMatchObject({ status: 202, body: { id: APP_ID, status: 'SIGNING' } });
+  });
+
+  it('returns 409 for TaskTimedOut after offerExpiresAt', async () => {
+    withApp(offered(PAST));
+    timedOut();
+    expect(await sign()).toMatchObject({ status: 409, body: { detail: 'Erbjudandet har gått ut' } });
+  });
+
+  it('returns 500 for other Step Functions errors', async () => {
+    withApp(offered());
+    sfn.on(SendTaskSuccessCommand).rejects(Object.assign(new Error('down'), { name: 'ServiceUnavailable' }));
+    expect((await sign()).status).toBe(500);
   });
 });
