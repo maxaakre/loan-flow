@@ -17,6 +17,7 @@ describe('GithubOidcStack', () => {
     expect(Object.keys(template.findResources('AWS::IAM::OIDCProvider'))).toHaveLength(0);
   });
 
+  type Statement = Record<string, unknown>;
   const roles = template.findResources('AWS::IAM::Role');
   const policies = template.findResources('AWS::IAM::Policy');
   const prefix = 'repo:maxaakre@36918283/loan-flow@1401563715';
@@ -25,13 +26,13 @@ describe('GithubOidcStack', () => {
   const roleEntry = (name: string) => {
     const entry = Object.entries(roles).find(([, r]) => r.Properties.RoleName === name);
     if (!entry) throw new Error(`role ${name} not found`);
-    return { id: entry[0], trust: entry[1].Properties.AssumeRolePolicyDocument.Statement as Record<string, any>[] };
+    return { id: entry[0], trust: entry[1].Properties.AssumeRolePolicyDocument.Statement as Statement[] };
   };
   /** Resources of every statement in the inline policies attached to the role. */
   const policyResources = (roleId: string) =>
     Object.values(policies)
       .filter((p) => p.Properties.Roles.some((r: { Ref: string }) => r.Ref === roleId))
-      .flatMap((p) => p.Properties.PolicyDocument.Statement as Record<string, any>[])
+      .flatMap((p) => p.Properties.PolicyDocument.Statement as Statement[])
       .flatMap((st) => {
         expect(st.Action).toBe('sts:AssumeRole');
         expect(st.Effect).toBe('Allow');
@@ -42,11 +43,11 @@ describe('GithubOidcStack', () => {
   it('deploy role trusts only the main branch via web identity from the imported provider', () => {
     const { trust } = roleEntry('loanflow-github-deploy');
     expect(trust).toHaveLength(1);
-    expect(trust[0].Effect).toBe('Allow');
-    expect(trust[0].Action).toBe('sts:AssumeRoleWithWebIdentity');
-    expect(JSON.stringify(trust[0].Principal)).toContain(`oidc-provider/${oidc}`);
-    expect(Object.keys(trust[0].Principal)).toEqual(['Federated']);
-    expect(trust[0].Condition).toEqual({
+    expect(trust[0]!.Effect).toBe('Allow');
+    expect(trust[0]!.Action).toBe('sts:AssumeRoleWithWebIdentity');
+    expect(JSON.stringify(trust[0]!.Principal)).toContain(`oidc-provider/${oidc}`);
+    expect(Object.keys(trust[0]!.Principal as object)).toEqual(['Federated']);
+    expect(trust[0]!.Condition).toEqual({
       StringEquals: {
         [`${oidc}:aud`]: 'sts.amazonaws.com',
         [`${oidc}:sub`]: `${prefix}:ref:refs/heads/main`,
@@ -65,9 +66,9 @@ describe('GithubOidcStack', () => {
   it('diff role trusts only pull requests and can only assume the lookup role', () => {
     const { id, trust } = roleEntry('loanflow-github-diff');
     expect(trust).toHaveLength(1);
-    expect(trust[0].Action).toBe('sts:AssumeRoleWithWebIdentity');
-    expect(JSON.stringify(trust[0].Principal)).toContain(`oidc-provider/${oidc}`);
-    expect(trust[0].Condition).toEqual({
+    expect(trust[0]!.Action).toBe('sts:AssumeRoleWithWebIdentity');
+    expect(JSON.stringify(trust[0]!.Principal)).toContain(`oidc-provider/${oidc}`);
+    expect(trust[0]!.Condition).toEqual({
       StringEquals: {
         [`${oidc}:aud`]: 'sts.amazonaws.com',
         [`${oidc}:sub`]: `${prefix}:pull_request`,
