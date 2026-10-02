@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DECISION_OUTCOMES, REASON_CODES } from './credit';
+import { OUTCOME_SV } from './labels';
 import { formatKr, OreSchema } from './money';
 import { TERMS } from './pricing';
 
@@ -58,6 +59,16 @@ export type DomainEvent<T extends EventType = EventType> = {
   [K in T]: EventMeta & { type: K; version: 1; data: EventData<K> };
 }[T];
 
+/** Events that send the customer an email. The notifications rule only forwards these. */
+export const NOTIFY_TYPES = [
+  'OfferCreated',
+  'OfferExpired',
+  'ApplicationSentToManualReview',
+  'LoanDisbursed',
+  'LoanRepaid',
+] as const satisfies readonly EventType[];
+export type NotifyType = (typeof NOTIFY_TYPES)[number];
+
 export function makeEvent<T extends EventType>(type: T, meta: EventMeta, data: EventData<T>): DomainEvent<T> {
   const parsed = (EVENT_SCHEMAS[type] as z.ZodType).parse(data);
   return { ...meta, type, version: 1, data: parsed } as DomainEvent<T>;
@@ -79,13 +90,6 @@ export function parseEvent(raw: unknown): DomainEvent {
   const data = EVENT_SCHEMAS[e.type].parse(e.data);
   return { ...e, data } as DomainEvent;
 }
-
-const OUTCOME_SV = {
-  APPROVED: 'Beviljad',
-  APPROVED_WITH_CHANGES: 'Beviljad med ändring',
-  DECLINED: 'Nekad',
-  MANUAL_REVIEW: 'Manuell granskning',
-} as const;
 
 /** One short Swedish line for the timeline. */
 export function summarize(event: DomainEvent): string {

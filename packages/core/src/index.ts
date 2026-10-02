@@ -6,3 +6,4 @@ export * from './credit';
 export * from './ledger';
 export * from './domain';
 export * from './events';
+export * from './labels';

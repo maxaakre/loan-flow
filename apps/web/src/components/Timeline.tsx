@@ -1,9 +1,9 @@
-import type { TimelineItem } from '../api';
+import { compareTimeline, type TimelineItem } from '@loanflow/core';
 import { formatTime } from '../format';
 
 export function Timeline({ items }: { items: TimelineItem[] }) {
   // Events can arrive out of order, so sort here as well as on the server
-  const sorted = [...items].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.sequence - b.sequence);
+  const sorted = [...items].sort(compareTimeline);
   if (sorted.length === 0) return <p className="muted">Väntar på händelser…</p>;
   return (
     <ol className="timeline">

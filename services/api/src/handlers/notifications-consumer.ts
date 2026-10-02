@@ -1,22 +1,21 @@
 import { PutCommand } from '@aws-sdk/lib-dynamodb';
-import { parseEvent, summarize, type EventType } from '@loanflow/core';
+import { parseEvent, summarize, type EventType, type NotifyType } from '@loanflow/core';
 import { doc, isConditionalFailure, tableName } from '../db/client';
 import { notifKey, ONE_DAY, ttlIn } from '../db/keys';
 import { logger } from '../http';
 import { sqsBatch } from '../sqs';
 
-const SUBJECTS: Partial<Record<EventType, string>> = {
+const SUBJECTS: Record<NotifyType, string> = {
   OfferCreated: 'Ditt låneerbjudande är klart',
   OfferExpired: 'Ditt erbjudande har gått ut',
   ApplicationSentToManualReview: 'Vi tittar närmare på din ansökan',
   LoanDisbursed: 'Pengarna är på väg',
   LoanRepaid: 'Lånet är återbetalt',
 };
-export const NOTIFY_TYPES = Object.keys(SUBJECTS) as EventType[];
 
 export const handler = sqsBatch(async (detail) => {
   const event = parseEvent(detail);
-  const subject = SUBJECTS[event.type];
+  const subject: string | undefined = (SUBJECTS as Partial<Record<EventType, string>>)[event.type];
   if (!subject) return;
 
   // Claim first, then send. Trade-off: a crash after the claim loses one email (at-most-once),

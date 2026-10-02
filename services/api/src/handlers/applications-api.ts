@@ -1,6 +1,7 @@
 import { SendTaskSuccessCommand, SFNClient } from '@aws-sdk/client-sfn';
 import { MetricUnit } from '@aws-lambda-powertools/metrics';
 import {
+  amountRangeMessage,
   findCompany,
   makeEvent,
   MAX_AMOUNT,
@@ -35,7 +36,7 @@ const sfn = tracer.captureAWSv3Client(new SFNClient({}));
 
 const CreateApplication = z.object({
   orgNr: z.string().max(20),
-  amount: OreSchema.refine((a) => a >= MIN_AMOUNT && a <= MAX_AMOUNT, 'must be between 10 000 and 2 000 000 kr'),
+  amount: OreSchema.refine((a) => a >= MIN_AMOUNT && a <= MAX_AMOUNT, amountRangeMessage()),
   termMonths: z.literal([...TERMS]),
 });
 

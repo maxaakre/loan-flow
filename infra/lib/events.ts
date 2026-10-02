@@ -1,3 +1,4 @@
+import { NOTIFY_TYPES } from '@loanflow/core';
 import { Duration } from 'aws-cdk-lib';
 import type * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as events from 'aws-cdk-lib/aws-events';
@@ -16,9 +17,6 @@ export interface EventsProps {
   stateMachine: IStateMachine;
 }
 
-// Keep in sync with SUBJECTS in services/api/src/handlers/notifications-consumer.ts.
-// The consumer ignores other types anyway, so this filter only saves invocations.
-const NOTIFY_TYPES = ['OfferCreated', 'OfferExpired', 'ApplicationSentToManualReview', 'LoanDisbursed', 'LoanRepaid'];
 const CONSUMER_TIMEOUT = Duration.seconds(10);
 
 /** Choreography between parts: consumers subscribe to the bus without the process knowing. */
@@ -65,7 +63,8 @@ export class EventsConstruct extends Construct {
     const timeline = this.consumer(props, 'Timeline', 'handlers/timeline-consumer');
     table.grant(timeline, 'dynamodb:PutItem');
 
-    const notifications = this.consumer(props, 'Notifications', 'handlers/notifications-consumer', NOTIFY_TYPES);
+    // The consumer ignores other types anyway, so this filter only saves invocations
+    const notifications = this.consumer(props, 'Notifications', 'handlers/notifications-consumer', [...NOTIFY_TYPES]);
     table.grant(notifications, 'dynamodb:PutItem');
   }
 

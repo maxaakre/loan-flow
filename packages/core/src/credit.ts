@@ -1,11 +1,13 @@
 import type { Company } from './companies';
-import { kr, ore, percentOf, type Ore } from './money';
+import { formatKr, kr, ore, percentOf, type Ore } from './money';
 import { buildOffer, maxMonthlyCost, MONTHLY_FEE_RATE, type RiskBand, type TermMonths } from './pricing';
 
 export const RULES_VERSION = '2026-10-01';
 export const MIN_AMOUNT = kr(10_000);
 export const MAX_AMOUNT = kr(2_000_000);
 export const AUTO_LIMIT = kr(1_000_000);
+export const amountRangeMessage = (): string =>
+  `Beloppet måste vara mellan ${formatKr(MIN_AMOUNT)} och ${formatKr(MAX_AMOUNT)}.`;
 const CASHFLOW_SHARE = 0.15;
 const AMOUNT_STEP = kr(1_000);
 

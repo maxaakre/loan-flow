@@ -1,6 +1,7 @@
 import { Logger } from '@aws-lambda-powertools/logger';
 import { Metrics } from '@aws-lambda-powertools/metrics';
 import { Tracer } from '@aws-lambda-powertools/tracer';
+import { ID_PATTERN } from '@loanflow/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, Context } from 'aws-lambda';
 import { createHash } from 'node:crypto';
 import type { ZodType } from 'zod';
@@ -40,7 +41,7 @@ export function parseBody<T>(event: APIGatewayProxyEventV2, schema: ZodType<T>):
 
 export function pathId(event: APIGatewayProxyEventV2): string {
   const id = event.pathParameters?.id;
-  if (!id || !/^[A-Za-z0-9-]{1,64}$/.test(id)) throw new HttpError(404, 'Not found', 'Hittades inte.');
+  if (!id || !ID_PATTERN.test(id)) throw new HttpError(404, 'Not found', 'Hittades inte.');
   return id;
 }
 

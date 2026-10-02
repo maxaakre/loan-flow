@@ -1,5 +1,5 @@
 import { kr } from '@loanflow/core';
-import { STATUS_SV, toOre } from './format';
+import { toOre } from './format';
 
 describe('toOre (Review Focus 5)', () => {
   it('accepts whole kronor with spaces', () => {
@@ -16,9 +16,5 @@ describe('toOre (Review Focus 5)', () => {
   it('rejects absurdly long input without throwing', () => {
     expect(() => toOre('99999999999999999999')).not.toThrow();
     expect(toOre('99999999999999999999').ok).toBe(false);
-  });
-
-  it('has a Swedish label for every status', () => {
-    expect(STATUS_SV.MANUAL_REVIEW).toBe('Manuell granskning');
   });
 });

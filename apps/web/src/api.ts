@@ -1,6 +1,5 @@
-import type { LedgerEntry, Loan, Ore, PublicApplication, TermMonths } from '@loanflow/core';
+import type { LedgerEntry, Loan, Ore, PublicApplication, TermMonths, TimelineItem } from '@loanflow/core';
 
-export type TimelineItem = { eventId: string; type: string; occurredAt: string; sequence: number; summary: string };
 export type CompanyOption = { orgNr: string; name: string };
 
 export class ApiError extends Error {

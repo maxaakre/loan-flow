@@ -1,3 +1,4 @@
+import { DECISION_OUTCOMES } from '@loanflow/core';
 import { Duration } from 'aws-cdk-lib';
 import type { HttpApi } from 'aws-cdk-lib/aws-apigatewayv2';
 import * as cw from 'aws-cdk-lib/aws-cloudwatch';
@@ -69,7 +70,7 @@ export class MonitoringConstruct extends Construct {
     dashboard.addWidgets(
       new cw.GraphWidget({
         title: 'Credit decisions',
-        left: ['APPROVED', 'APPROVED_WITH_CHANGES', 'DECLINED', 'MANUAL_REVIEW'].map((o) =>
+        left: DECISION_OUTCOMES.map((o) =>
           appMetric('CreditDecisions', 'assess-credit', { outcome: o }, o),
         ),
       }),

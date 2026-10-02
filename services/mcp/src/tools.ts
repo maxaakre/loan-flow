@@ -1,9 +1,9 @@
-import { APPLICATION_STATUSES } from '@loanflow/core';
+import { APPLICATION_STATUSES, IdSchema } from '@loanflow/core';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Fetcher } from './client';
 
-const id = z.string().regex(/^[A-Za-z0-9-]{1,64}$/, 'not a valid id');
+const id = IdSchema;
 const json = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] });
 const MONEY_NOTE = 'All amounts are integer öre (1 kr = 100 öre).';
 

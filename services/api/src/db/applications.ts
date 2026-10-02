@@ -1,5 +1,12 @@
 import { GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { assertTransition, type Application, type ApplicationStatus, type EventMeta } from '@loanflow/core';
+import {
+  assertTransition,
+  compareTimeline,
+  type Application,
+  type ApplicationStatus,
+  type EventMeta,
+  type TimelineItem,
+} from '@loanflow/core';
 import { ulid } from 'ulid';
 import { doc, tableName, type TransactItem } from './client';
 import { appKey } from './keys';
@@ -107,8 +114,6 @@ export async function listApplicationsByStatus(status: ApplicationStatus, limit 
   return (res.Items ?? []).map((i) => strip<Application>(i));
 }
 
-export type TimelineItem = { eventId: string; type: string; occurredAt: string; sequence: number; summary: string };
-
 export async function listTimeline(applicationId: string): Promise<TimelineItem[]> {
   const res = await doc.send(
     new QueryCommand({
@@ -118,7 +123,5 @@ export async function listTimeline(applicationId: string): Promise<TimelineItem[
       ConsistentRead: true,
     }),
   );
-  return (res.Items ?? [])
-    .map((i) => strip<TimelineItem>(i))
-    .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.sequence - b.sequence);
+  return (res.Items ?? []).map((i) => strip<TimelineItem>(i)).sort(compareTimeline);
 }
