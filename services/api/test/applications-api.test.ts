@@ -200,6 +200,45 @@ describe('POST /api/applications/{id}/sign', () => {
     expect(await sign()).toMatchObject({ status: 409, body: { detail: 'Erbjudandet har gått ut' } });
   });
 
+  describe('when the token is gone, re-reads the application', () => {
+    /** First read returns `first`, every later read `then`. */
+    const readsAs = (first: unknown, then: unknown) => {
+      let reads = 0;
+      ddb.on(GetCommand).callsFake(async (input) => (input.Key.PK.startsWith('IDEMP#') ? {} : reads++ === 0 ? first : then));
+      ddb.on(PutCommand).resolves({});
+    };
+    const gone = Object.assign(new Error('x'), { name: 'TaskTimedOut' });
+
+    it('retries once with the new token when create-offer swapped it', async () => {
+      readsAs(offered(), { Item: anApplication({ status: 'OFFERED', taskToken: 'tok-2', offerExpiresAt: FUTURE }) });
+      sfn.on(SendTaskSuccessCommand, { taskToken: 'tok-1' }).rejects(gone);
+      sfn.on(SendTaskSuccessCommand, { taskToken: 'tok-2' }).resolves({});
+      expect(await sign()).toMatchObject({ status: 202, body: { id: APP_ID, status: 'SIGNING' } });
+      expect(sfn.commandCalls(SendTaskSuccessCommand).map((c) => c.args[0].input.taskToken)).toEqual(['tok-1', 'tok-2']);
+    });
+
+    it('answers 202 when the application is now SIGNED, even after offerExpiresAt', async () => {
+      readsAs(offered(PAST), { Item: anApplication({ status: 'SIGNED' }) });
+      sfn.on(SendTaskSuccessCommand).rejects(gone);
+      expect(await sign()).toMatchObject({ status: 202, body: { id: APP_ID, status: 'SIGNING' } });
+      expect(sfn.commandCalls(SendTaskSuccessCommand)).toHaveLength(1);
+    });
+
+    it('answers 409 when the application is now EXPIRED, even before offerExpiresAt', async () => {
+      readsAs(offered(FUTURE), { Item: anApplication({ status: 'EXPIRED', offerExpiresAt: FUTURE }) });
+      sfn.on(SendTaskSuccessCommand).rejects(gone);
+      expect(await sign()).toMatchObject({ status: 409, body: { detail: 'Erbjudandet har gått ut' } });
+      expect(ddb.commandCalls(PutCommand)).toHaveLength(0); // no 202 remembered
+    });
+
+    it('answers 409 when the swapped token is gone too and the offer has expired', async () => {
+      readsAs(offered(), { Item: anApplication({ status: 'OFFERED', taskToken: 'tok-2', offerExpiresAt: PAST }) });
+      sfn.on(SendTaskSuccessCommand).rejects(gone);
+      expect(await sign()).toMatchObject({ status: 409, body: { detail: 'Erbjudandet har gått ut' } });
+      expect(sfn.commandCalls(SendTaskSuccessCommand)).toHaveLength(2);
+    });
+  });
+
   it('returns 500 for other Step Functions errors', async () => {
     withApp(offered());
     sfn.on(SendTaskSuccessCommand).rejects(Object.assign(new Error('down'), { name: 'ServiceUnavailable' }));

@@ -13,5 +13,5 @@ A customer can press "Sign" in the same second the offer expires. If both the AP
 
 ## Consequences
 - No race in our code: the arbiter is a managed service.
-- AWS also returns `TaskTimedOut` for an already-used token. So `sign` answers `202` when the token is gone but `offerExpiresAt` has not passed (a retried sign after a lost response), and `409` only after the deadline.
+- AWS also returns `TaskTimedOut` for an already-used token. So when the token is gone, `sign` re-reads the application: `SIGNED`/`DISBURSED` → `202`; a newer token (create-offer was retried) → one retry with that token; still `OFFERED` with the same token before `offerExpiresAt` → `202` (an earlier sign is still being written); anything else → `409`.
 - The API answers `202 Accepted`; the UI sees `SIGNED` a moment later by polling.

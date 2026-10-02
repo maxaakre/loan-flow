@@ -94,6 +94,37 @@ async function events(event: APIGatewayProxyEventV2): Promise<HttpResult> {
 const EXPIRED = 'Erbjudandet har gått ut';
 const TOKEN_GONE = new Set(['TaskTimedOut', 'TaskDoesNotExist', 'InvalidToken']);
 
+/** Resumes the waiting process. Returns false when Step Functions no longer knows the token. */
+async function resume(taskToken: string, ctx: RequestContext): Promise<boolean> {
+  try {
+    await sfn.send(new SendTaskSuccessCommand({ taskToken, output: JSON.stringify({ signedAt: ctx.now.toISOString() }) }));
+    return true;
+  } catch (err) {
+    if (err instanceof Error && TOKEN_GONE.has(err.name)) return false;
+    throw err;
+  }
+}
+
+/** The token we tried is gone. Re-read the application to learn why; throws 409 unless it was signed. */
+async function afterTokenGone(id: string, tried: string, ctx: RequestContext): Promise<void> {
+  const app = await getApplication(id);
+  if (!app) throw notFound();
+  if (app.status === 'SIGNED' || app.status === 'DISBURSED') return;
+  // create-offer was retried and stored a new token: the old one never reached the customer's offer
+  if (app.status === 'OFFERED' && app.taskToken && app.taskToken !== tried) {
+    if (await resume(app.taskToken, ctx)) return;
+    tried = app.taskToken;
+  }
+  // Same token, still OFFERED, before the deadline: an earlier sign used the token and the SIGNED
+  // write is still pending. We assume nothing else can use up a token before the offer expires.
+  const pending =
+    app.status === 'OFFERED' &&
+    app.taskToken === tried &&
+    app.offerExpiresAt !== undefined &&
+    ctx.now.getTime() < Date.parse(app.offerExpiresAt);
+  if (!pending) throw new HttpError(409, 'Offer expired', EXPIRED);
+}
+
 /**
  * Only resumes the state machine. Step Functions is the arbiter between signing and expiry:
  * a task token completes once, so the process writes SIGNED or EXPIRED, never both.
@@ -118,17 +149,7 @@ async function sign(event: APIGatewayProxyEventV2, ctx: RequestContext): Promise
     throw new HttpError(409, 'Offer not signable', 'Erbjudandet kan inte signeras.');
   }
 
-  try {
-    await sfn.send(
-      new SendTaskSuccessCommand({ taskToken: app.taskToken, output: JSON.stringify({ signedAt: ctx.now.toISOString() }) }),
-    );
-  } catch (err) {
-    if (!(err instanceof Error && TOKEN_GONE.has(err.name))) throw err;
-    // The token is also gone when an earlier sign consumed it and the status write is still pending.
-    // Before the offer expires that is the only possible cause, so treat it as already signed.
-    const stillValid = app.offerExpiresAt !== undefined && ctx.now.getTime() < Date.parse(app.offerExpiresAt);
-    if (!stillValid) throw new HttpError(409, 'Offer expired', EXPIRED);
-  }
+  if (!(await resume(app.taskToken, ctx))) await afterTokenGone(id, app.taskToken, ctx);
 
   await rememberResult(key, hash, accepted);
   return accepted;
