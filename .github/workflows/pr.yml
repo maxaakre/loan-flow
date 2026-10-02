@@ -40,7 +40,10 @@ jobs:
         run: |
           pnpm exec cdk diff LoanFlow --no-change-set \
             -c alertEmail="$ALERT_EMAIL" -c offerTimeoutSeconds=${{ vars.OFFER_TIMEOUT_SECONDS }} 2>&1 | tee diff.txt
-          { echo '### cdk diff'; echo '```'; cat diff.txt; echo '```'; } > diff.md
+          # The PR comment is public and not masked like the log: redact the alert email (fixed string, not a pattern)
+          out=$(cat diff.txt)
+          if [ -n "$ALERT_EMAIL" ]; then out="${out//"$ALERT_EMAIL"/[redacted]}"; fi
+          { echo '### cdk diff'; echo '```'; printf '%s\n' "$out"; echo '```'; } > diff.md
 
       - uses: marocchino/sticky-pull-request-comment@v2
         if: github.event_name == 'pull_request'
