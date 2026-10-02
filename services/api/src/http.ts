@@ -53,6 +53,10 @@ export function idempotencyKey(event: APIGatewayProxyEventV2): string {
   return key;
 }
 
+/**
+ * Idempotency keys are global, not per route. Callers must hash the route, any path id and
+ * the body, e.g. `requestHash({ route: event.routeKey, id, body })`.
+ */
 export const requestHash = (value: unknown): string =>
   createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex');
 
@@ -64,7 +68,8 @@ const respond = (statusCode: number, body: unknown, contentType = 'application/j
 
 export function httpHandler(fn: (event: APIGatewayProxyEventV2, ctx: RequestContext) => Promise<HttpResult>) {
   return async (event: APIGatewayProxyEventV2, context: Context): Promise<APIGatewayProxyStructuredResultV2> => {
-    const correlationId = event.headers['x-correlation-id'] ?? event.requestContext.requestId;
+    const supplied = event.headers['x-correlation-id'];
+    const correlationId = supplied && /^[A-Za-z0-9-]{1,64}$/.test(supplied) ? supplied : event.requestContext.requestId;
     logger.addContext(context);
     logger.appendKeys({ correlationId, route: event.routeKey });
     const problem = (status: number, title: string, detail: string) =>

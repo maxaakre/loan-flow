@@ -5,6 +5,10 @@ import { idempKey, ONE_DAY, ttlIn } from './keys';
 
 export type IdempotencyCheck = { kind: 'new' } | { kind: 'replay'; result: HttpResult };
 
+/**
+ * Keys are global, so `hash` must cover the route, any path id and the body:
+ * `requestHash({ route: event.routeKey, id, body })`.
+ */
 export async function checkIdempotency(key: string, hash: string): Promise<IdempotencyCheck> {
   const res = await doc.send(new GetCommand({ TableName: tableName(), Key: idempKey(key), ConsistentRead: true }));
   if (!res.Item) return { kind: 'new' };

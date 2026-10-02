@@ -2,12 +2,13 @@ import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-s
 import { InvalidTransitionError, makeEvent } from '@loanflow/core';
 import { mockClient } from 'aws-sdk-client-mock';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { updateLoan } from '../src/db/loans';
 import { updateApplication } from '../src/db/applications';
 import { ConditionFailedError, transact } from '../src/db/client';
 import { checkIdempotency } from '../src/db/idempotency';
 import { outboxPut } from '../src/db/outbox';
 import { HttpError } from '../src/http';
-import { anApplication, NOW } from './fixtures';
+import { aLoan, anApplication, NOW } from './fixtures';
 
 const ddb = mockClient(DynamoDBDocumentClient);
 beforeEach(() => ddb.reset());
@@ -40,6 +41,29 @@ describe('updateApplication', () => {
     const { item, next } = updateApplication(app, { status: 'SIGNED', taskToken: undefined }, NOW);
     expect(item.Update?.UpdateExpression).toMatch(/ REMOVE #f\d+$/);
     expect(next).not.toHaveProperty('taskToken');
+  });
+
+  it('maps the REMOVE alias to the field and sets no value for it', () => {
+    const app = anApplication({ status: 'OFFERED', taskToken: 'tok' });
+    const { item } = updateApplication(app, { status: 'SIGNED', taskToken: undefined }, NOW);
+    const update = item.Update!;
+    const alias = /REMOVE (#f\d+)$/.exec(update.UpdateExpression!)?.[1];
+    expect(alias).toBeDefined();
+    expect(update.ExpressionAttributeNames?.[alias!]).toBe('taskToken');
+    const [setPart] = update.UpdateExpression!.split(' REMOVE ');
+    expect(setPart).not.toContain(`${alias} `);
+    const n = alias!.slice(2);
+    expect(update.ExpressionAttributeValues).not.toHaveProperty(`:v${n}`);
+  });
+
+  it('leaves the status index alone when status is not changed', () => {
+    const { item } = updateApplication(anApplication(), { taskToken: 'new' }, NOW);
+    expect(Object.values(item.Update?.ExpressionAttributeNames ?? {})).not.toContain('GSI1PK');
+    expect(Object.values(item.Update?.ExpressionAttributeValues ?? {})).not.toContainEqual(expect.stringMatching(/^STATUS#/));
+  });
+
+  it('refuses to remove the status', () => {
+    expect(() => updateApplication(anApplication(), { status: undefined }, NOW)).toThrow(/status/);
   });
 
   it('refuses an invalid status change', () => {
@@ -77,5 +101,21 @@ describe('outboxPut', () => {
     expect(item.Put?.Item).toMatchObject({ PK: 'OUTBOX#E1', SK: 'META', event });
     expect(typeof item.Put?.Item?.ttl).toBe('number');
     expect(item.Put?.ConditionExpression).toBe('attribute_not_exists(PK)');
+  });
+});
+
+describe('updateLoan', () => {
+  it('checks the old version and writes the new values', () => {
+    const loan = aLoan({ version: 2 });
+    const { item, next } = updateLoan(loan, { paidInstalments: 1, balance: loan.balance, status: 'ACTIVE' });
+    expect(next.version).toBe(3);
+    expect(item.Update?.ConditionExpression).toBe('#ver = :expected');
+    expect(item.Update?.ExpressionAttributeValues).toMatchObject({
+      ':expected': 2,
+      ':next': 3,
+      ':paid': 1,
+      ':balance': loan.balance,
+      ':status': 'ACTIVE',
+    });
   });
 });

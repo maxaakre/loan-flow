@@ -40,6 +40,7 @@ export function updateApplication(
   changes: ApplicationChanges,
   now: string,
 ): { item: TransactItem; next: Application } {
+  if ('status' in changes && changes.status === undefined) throw new Error('status cannot be removed');
   if (changes.status && changes.status !== app.status) assertTransition(app.status, changes.status);
 
   const fields: Record<string, unknown> = { ...changes, version: app.version + 1, updatedAt: now };
