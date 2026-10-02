@@ -4,6 +4,7 @@ import { assess, findCompany, kr, makeEvent, type Application } from '@loanflow/
 import type { SQSEvent } from 'aws-lambda';
 import { mockClient } from 'aws-sdk-client-mock';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { ConditionFailedError } from '../src/db/client';
 import { lookupCompany, RegistryUnavailableError } from '../src/fakes/registry';
 import { handler as startProcess } from '../src/handlers/start-process';
 import { handler as assessCredit } from '../src/steps/assess-credit';
@@ -156,6 +157,66 @@ describe('set-status', () => {
   it('is a no-op when the status is already set', async () => {
     stored(anApplication({ status: 'EXPIRED' }));
     await setStatus({ applicationId: APP_ID, status: 'EXPIRED' });
+    expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
+  });
+});
+
+describe('conflict handling (commitOrCheck)', () => {
+  const cancelled = () =>
+    Object.assign(new Error('cancelled'), {
+      name: 'TransactionCanceledException',
+      CancellationReasons: [{ Code: 'ConditionalCheckFailed' }, { Code: 'None' }],
+    });
+  const row = (app: Application) => ({ Item: { PK: `APP#${app.id}`, SK: 'META', ...app } });
+  const getTwice = (first: Application, second: Application) =>
+    ddb.on(GetCommand).resolvesOnce(row(first)).resolves(row(second));
+
+  it('fetch-company succeeds when a conflicting run already moved the application on', async () => {
+    getTwice(anApplication({ status: 'SUBMITTED' }), anApplication({ status: 'ASSESSING' }));
+    ddb.on(TransactWriteCommand).rejects(cancelled());
+    expect(await fetchCompany({ applicationId: APP_ID })).toEqual({ applicationId: APP_ID });
+  });
+
+  it('fetch-company rethrows the conflict when the work is still not done', async () => {
+    getTwice(anApplication({ status: 'SUBMITTED' }), anApplication({ status: 'SUBMITTED' }));
+    ddb.on(TransactWriteCommand).rejects(cancelled());
+    const err = await fetchCompany({ applicationId: APP_ID }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConditionFailedError);
+    expect((err as Error).name).toBe('ConditionFailedError');
+  });
+
+  it('assess-credit succeeds when a conflicting run already stored the decision', async () => {
+    const company = companyInput('559900-0001');
+    const decision = assess(company, { amount: kr(200_000), termMonths: 12 });
+    getTwice(
+      anApplication({ status: 'ASSESSING', company }),
+      anApplication({ status: 'ASSESSING', company, decision }),
+    );
+    ddb.on(TransactWriteCommand).rejects(new ConditionFailedError([0]));
+    expect(await assessCredit({ applicationId: APP_ID })).toEqual({ applicationId: APP_ID, outcome: 'APPROVED' });
+  });
+
+  it('set-status succeeds when a conflicting run already set the status', async () => {
+    getTwice(anApplication({ status: 'OFFERED', taskToken: 'tok' }), anApplication({ status: 'SIGNED' }));
+    ddb.on(TransactWriteCommand).rejects(cancelled());
+    expect(await setStatus({ applicationId: APP_ID, status: 'SIGNED', signedAt: NOW })).toEqual({
+      applicationId: APP_ID,
+    });
+  });
+
+  it('create-offer propagates a conflict on the first path', async () => {
+    const company = companyInput('559900-0002');
+    const decision = assess(company, { amount: kr(200_000), termMonths: 12 });
+    stored(anApplication({ status: 'ASSESSING', orgNr: '559900-0002', company, decision }));
+    ddb.on(TransactWriteCommand).rejects(cancelled());
+    await expect(createOffer({ applicationId: APP_ID, taskToken: 't' })).rejects.toBeInstanceOf(ConditionFailedError);
+  });
+});
+
+describe('fetch-company with the registry down', () => {
+  it('rejects with RegistryUnavailableError and writes nothing', async () => {
+    stored(anApplication({ status: 'SUBMITTED', orgNr: '559900-0004' }));
+    await expect(fetchCompany({ applicationId: APP_ID })).rejects.toBeInstanceOf(RegistryUnavailableError);
     expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
   });
 });
