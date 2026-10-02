@@ -1,5 +1,5 @@
 import { Duration, Stack } from 'aws-cdk-lib';
-import { CfnStage, HttpApi, HttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
+import { CfnRoute, CfnStage, HttpApi, HttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import type { ITable } from 'aws-cdk-lib/aws-dynamodb';
@@ -15,6 +15,9 @@ export interface ApiProps {
   stateMachine: IStateMachine;
 }
 
+/** New applications per UTC day across all users. */
+const DAILY_APPLICATION_LIMIT = 200;
+
 export class ApiConstruct extends Construct {
   readonly api: HttpApi;
   readonly functions: Record<string, NodejsFunction>;
@@ -25,13 +28,16 @@ export class ApiConstruct extends Construct {
     const { makeFn, table } = props;
 
     const companies = makeFn(this, 'CompaniesApi', 'handlers/companies-api');
-    const applications = makeFn(this, 'ApplicationsApi', 'handlers/applications-api');
+    const applications = makeFn(this, 'ApplicationsApi', 'handlers/applications-api', {
+      environment: { DAILY_APPLICATION_LIMIT: String(DAILY_APPLICATION_LIMIT) },
+    });
     const loans = makeFn(this, 'LoansApi', 'handlers/loans-api');
     const internal = makeFn(this, 'InternalApi', 'handlers/internal-api');
     this.functions = { companies, applications, loans, internal };
 
     // Least privilege per function. TransactWriteItems needs the per-item actions.
-    table.grant(applications, 'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:Query');
+    // UpdateItem: only for the daily application counter
+    table.grant(applications, 'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query');
     props.stateMachine.grantTaskResponse(applications);
     table.grant(loans, 'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query');
     table.grant(internal, 'dynamodb:GetItem', 'dynamodb:Query');
@@ -42,7 +48,7 @@ export class ApiConstruct extends Construct {
       this.api.addRoutes({ path, methods: [method], integration: integration(fn), authorizer });
 
     add(HttpMethod.GET, '/api/companies', companies);
-    add(HttpMethod.POST, '/api/applications', applications);
+    const [createRoute] = add(HttpMethod.POST, '/api/applications', applications);
     add(HttpMethod.GET, '/api/applications/{id}', applications);
     add(HttpMethod.GET, '/api/applications/{id}/events', applications);
     add(HttpMethod.POST, '/api/applications/{id}/sign', applications);
@@ -61,8 +67,13 @@ export class ApiConstruct extends Construct {
       add(HttpMethod.GET, path, internal, iamAuth);
     }
 
+    // Cost guard for a public demo, on top of the daily cap in applications-api.
+    // Each application starts a process and several Lambdas, so creating one is throttled hardest.
     const stage = this.api.defaultStage!.node.defaultChild as CfnStage;
-    stage.defaultRouteSettings = { throttlingRateLimit: 20, throttlingBurstLimit: 40 };
+    stage.defaultRouteSettings = { throttlingRateLimit: 5, throttlingBurstLimit: 10 };
+    // routeSettings is raw JSON, so it takes CloudFormation's PascalCase keys
+    stage.routeSettings = { 'POST /api/applications': { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 } };
+    stage.addDependency(createRoute!.node.defaultChild as CfnRoute); // route settings need the route to exist
 
     // The local MCP server assumes this role. It can read internal routes and nothing else.
     const { region, account } = Stack.of(this);

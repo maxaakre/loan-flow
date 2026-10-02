@@ -15,6 +15,7 @@ import { ulid } from 'ulid';
 import { z } from 'zod';
 import { eventMeta, getApplication, listTimeline, putApplication } from '../db/applications';
 import { transact } from '../db/client';
+import { countApplication } from '../db/daily-cap';
 import { checkIdempotency, idempotencyPut, rememberResult, replayOrThrow } from '../db/idempotency';
 import { outboxPut } from '../db/outbox';
 import {
@@ -49,6 +50,10 @@ async function create(event: APIGatewayProxyEventV2, ctx: RequestContext): Promi
 
   const company = findCompany(body.orgNr);
   if (!company) throw new HttpError(422, 'Unknown company', 'Okänt testföretag.');
+  // Cost guard for a public demo. Checked after idempotency, so a replay never counts.
+  if (!(await countApplication(ctx.now))) {
+    throw new HttpError(429, 'Daily limit reached', 'Demon har nått dagens gräns för ansökningar. Försök igen i morgon.');
+  }
 
   const now = ctx.now.toISOString();
   const app: Application = {

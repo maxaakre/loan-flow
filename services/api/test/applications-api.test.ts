@@ -1,5 +1,12 @@
 import { SendTaskSuccessCommand, SFNClient } from '@aws-sdk/client-sfn';
-import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  DynamoDBDocumentClient,
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+  TransactWriteCommand,
+  UpdateCommand,
+} from '@aws-sdk/lib-dynamodb';
 import { assess, findCompany, kr } from '@loanflow/core';
 import { mockClient } from 'aws-sdk-client-mock';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -57,6 +64,31 @@ describe('POST /api/applications', () => {
     });
     const res = await create(validBody);
     expect(res).toMatchObject({ status: 201, body: { id: 'FIRST' } });
+    expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
+    expect(ddb.commandCalls(UpdateCommand)).toHaveLength(0); // a replay does not count against the daily cap
+  });
+
+  it('counts the application against the daily cap before writing it', async () => {
+    ddb.on(GetCommand).resolves({});
+    ddb.on(UpdateCommand).resolves({});
+    ddb.on(TransactWriteCommand).resolves({});
+    expect((await create(validBody)).status).toBe(201);
+    const input = ddb.commandCalls(UpdateCommand)[0]!.args[0].input;
+    expect(input.Key).toEqual({ PK: expect.stringMatching(/^APPCOUNT#\d{4}-\d{2}-\d{2}$/), SK: 'COUNT' });
+    expect(input.UpdateExpression).toContain('ADD #count :one');
+    expect(input.ConditionExpression).toBe('attribute_not_exists(#count) OR #count < :max');
+    expect(input.ExpressionAttributeValues).toMatchObject({ ':one': 1, ':max': 200 });
+  });
+
+  it('answers 429 and writes nothing when the daily cap is reached', async () => {
+    ddb.on(GetCommand).resolves({});
+    ddb.on(UpdateCommand).rejects(Object.assign(new Error('full'), { name: 'ConditionalCheckFailedException' }));
+    const res = await create(validBody);
+    expect(res).toMatchObject({
+      status: 429,
+      contentType: 'application/problem+json',
+      body: { detail: 'Demon har nått dagens gräns för ansökningar. Försök igen i morgon.' },
+    });
     expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
   });
 

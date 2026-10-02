@@ -1,4 +1,4 @@
-import type { Template } from 'aws-cdk-lib/assertions';
+import { Match, type Template } from 'aws-cdk-lib/assertions';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { policiesWith, synth } from './helpers';
 
@@ -17,6 +17,24 @@ describe('API', () => {
     expect(internal).toHaveLength(5);
     for (const r of internal) expect(r.AuthorizationType).toBe('AWS_IAM');
     for (const r of all.filter((x) => x.RouteKey.includes(' /api/'))) expect(r.AuthorizationType ?? 'NONE').toBe('NONE');
+  });
+
+  it('throttles the stage, and new applications harder', () => {
+    template.hasResourceProperties('AWS::ApiGatewayV2::Stage', {
+      DefaultRouteSettings: { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 },
+      RouteSettings: { 'POST /api/applications': { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 2 } },
+    });
+  });
+
+  it('caps new applications per day and lets applications-api keep the counter', () => {
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: { Variables: Match.objectLike({ POWERTOOLS_SERVICE_NAME: 'applications-api', DAILY_APPLICATION_LIMIT: '200' }) },
+    });
+    const doc = JSON.stringify(
+      Object.entries(template.findResources('AWS::IAM::Policy')).find(([id]) => id.startsWith('ApiApplicationsApi'))![1].Properties
+        .PolicyDocument,
+    );
+    expect(doc).toContain('dynamodb:UpdateItem');
   });
 
   it('only applications-api can resume the process', () => {
