@@ -72,24 +72,39 @@ Smoke test: `pnpm exec tsx scripts/smoke.ts <SiteUrl> <ApiUrl>`.
 
 ### MCP server
 
-Add a profile to `~/.aws/config` (use the `McpReaderRoleArn` stack output; `source_profile` is the profile `aws login` writes to, usually `default`):
+A local, **read-only** MCP server for case handlers. Tools: `list_applications`, `get_application`, `explain_decision`, `list_events`, `get_ledger`. It calls the IAM-protected `/internal/*` routes with SigV4 — no API keys.
+
+**Quick setup:** `aws login --profile loanflow && scripts/setup-mcp.sh` does steps 1–2 and the 403 check below in one go (safe to re-run). The manual steps:
+
+**1. Add a profile** to `~/.aws/config` that assumes the read-only role (`McpReaderRoleArn` stack output). `source_profile` is the profile you log in with:
 
 ```ini
 [profile loanflow-mcp]
 role_arn = <McpReaderRoleArn>
-source_profile = default
+source_profile = loanflow
 region = eu-north-1
 ```
 
-Then register the server with Claude Code:
+Check it: `AWS_PROFILE=loanflow-mcp aws sts get-caller-identity` → `assumed-role/loanflow-mcp-reader/…`.
+
+**2. Register the server** with Claude Code, from the repo root (local scope = only this project):
 
 ```bash
 API_URL=$(jq -r '.LoanFlow.ApiUrl' infra/cdk-outputs.json)
-claude mcp add loanflow -e LOANFLOW_API_URL="$API_URL" -e AWS_PROFILE=loanflow-mcp -- \
+claude mcp add loanflow -s local -e LOANFLOW_API_URL="$API_URL" -e AWS_PROFILE=loanflow-mcp -- \
   "$PWD/services/mcp/node_modules/.bin/tsx" "$PWD/services/mcp/src/server.ts"
 ```
 
-In a new session ask: *"Which applications are in manual review, and why?"*
+**3. Use it:**
+
+```bash
+aws login --profile loanflow   # if the session has expired
+claude                         # then /mcp → "loanflow" should be connected
+```
+
+Ask: *"Which applications are in manual review, and why?"*
+
+The internal API refuses unsigned calls: `curl -s -o /dev/null -w '%{http_code}' "$API_URL/internal/applications"` → `403`.
 
 ## CI setup
 
