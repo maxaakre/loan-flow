@@ -57,6 +57,13 @@ describe('monitoring', () => {
     const alarms = Object.values(template.findResources('AWS::CloudWatch::Alarm')).map((a) => a.Properties);
     expect(alarms.filter((a) => a.MetricName === 'ApproximateNumberOfMessagesVisible')).toHaveLength(4);
     expect(alarms.some((a) => a.MetricName === 'ExecutionsFailed')).toBe(true);
+    expect(alarms.some((a) => a.MetricName === '5xx')).toBe(true);
+  });
+
+  it('stays at 6 alarms (free tier is 10) and every alarm notifies', () => {
+    const alarms = Object.values(template.findResources('AWS::CloudWatch::Alarm')).map((a) => a.Properties);
+    expect(alarms).toHaveLength(6); // 4 DLQ + ProcessFailed + Api5xx
+    for (const a of alarms) expect(a.AlarmActions).toHaveLength(1);
   });
 
   it('has a $5 budget alert', () => {

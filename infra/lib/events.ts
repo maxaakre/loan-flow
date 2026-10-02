@@ -43,7 +43,8 @@ export class EventsConstruct extends Construct {
         startingPosition: lambda.StartingPosition.TRIM_HORIZON,
         batchSize: 10,
         bisectBatchOnError: true,
-        retryAttempts: 5,
+        retryAttempts: 10,
+        maxRecordAge: Duration.days(1),
         reportBatchItemFailures: true,
         onFailure: new SqsDlq(relayDlq),
         filters: [

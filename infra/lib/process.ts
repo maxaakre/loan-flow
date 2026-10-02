@@ -34,7 +34,7 @@ export class ProcessConstruct extends Construct {
     for (const fn of Object.values(this.functions)) table.grant(fn, ...STEP_ACTIONS);
 
     const appId = sfn.JsonPath.stringAt('$.applicationId');
-    const conflictRetry = { errors: ['ConditionFailedError'], interval: Duration.seconds(1), maxAttempts: 3, backoffRate: 2 };
+    const conflictRetry = { errors: ['ConditionFailedError', 'TransactionConflictError'], interval: Duration.seconds(1), maxAttempts: 3, backoffRate: 2 };
     const setStatus = (name: string, payload: Record<string, unknown>) =>
       new tasks.LambdaInvoke(this, name, {
         lambdaFunction: setStatusFn,
@@ -74,7 +74,11 @@ export class ProcessConstruct extends Construct {
     const offerAndWait = new tasks.LambdaInvoke(this, 'Create offer and wait for signature', {
       lambdaFunction: createOfferFn,
       integrationPattern: sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
-      payload: sfn.TaskInput.fromObject({ applicationId: appId, taskToken: sfn.JsonPath.taskToken }),
+      payload: sfn.TaskInput.fromObject({
+        applicationId: appId,
+        taskToken: sfn.JsonPath.taskToken,
+        enteredAt: sfn.JsonPath.stringAt('$$.State.EnteredTime'),
+      }),
       taskTimeout: sfn.Timeout.duration(props.offerTimeout),
       resultPath: '$.signature',
     }).addRetry(conflictRetry);

@@ -39,6 +39,8 @@ describe('outbox relay', () => {
     template.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
       FunctionResponseTypes: ['ReportBatchItemFailures'],
       BisectBatchOnFunctionError: true,
+      MaximumRetryAttempts: 10,
+      MaximumRecordAgeInSeconds: 86_400,
       DestinationConfig: { OnFailure: Match.objectLike({}) },
       FilterCriteria: {
         Filters: [{ Pattern: Match.serializedJson({ eventName: ['INSERT'], dynamodb: { Keys: { PK: { S: [{ prefix: 'OUTBOX#' }] } } } }) }],
@@ -98,6 +100,7 @@ describe('loan process', () => {
     expect(wait.Resource).toMatch(/\.waitForTaskToken$/);
     expect(wait.Parameters.Payload).toHaveProperty(['taskToken.$']);
     expect(wait.Parameters.Payload).toHaveProperty(['applicationId.$']);
+    expect(wait.Parameters.Payload['enteredAt.$']).toBe('$$.State.EnteredTime');
     expect(wait.Catch).toContainEqual(expect.objectContaining({ ErrorEquals: ['States.Timeout'], Next: 'Mark expired' }));
   });
 

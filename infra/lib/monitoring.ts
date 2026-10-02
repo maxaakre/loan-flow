@@ -46,9 +46,7 @@ export class MonitoringConstruct extends Construct {
     }
     alarm(props.stateMachine.metricFailed({ period }), 'ProcessFailed', 1, 'A loan process execution failed');
     alarm(props.api.metricServerError({ period }), 'Api5xx', 5, 'API is returning 5xx errors');
-    for (const [name, fn] of Object.entries(props.functions)) {
-      alarm(fn.metricErrors({ period }), `${name}Errors`, 1, `${name} Lambda errors`);
-    }
+    // No per-Lambda error alarms: fetch-company throws by design while the registry is down (handled by the process)
 
     // Spend guard: free tier should keep this near zero
     new budgets.CfnBudget(this, 'Budget', {
@@ -101,6 +99,10 @@ export class MonitoringConstruct extends Construct {
       new cw.GraphWidget({
         title: 'DLQ depth',
         left: props.dlqs.map((q) => q.metricApproximateNumberOfMessagesVisible({ period, label: q.node.id })),
+      }),
+      new cw.GraphWidget({
+        title: 'Lambda errors',
+        left: Object.entries(props.functions).map(([name, fn]) => fn.metricErrors({ period, label: name })),
       }),
       new cw.GraphWidget({
         title: 'Lambda duration p95',
