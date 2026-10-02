@@ -14,6 +14,13 @@ const eventBridge = tracer.captureAWSv3Client(new EventBridgeClient({}));
 export const handler = async (event: DynamoDBStreamEvent): Promise<DynamoDBBatchResponse> => {
   for (const record of event.Records) {
     const sequenceNumber = record.dynamodb?.SequenceNumber ?? '';
+    // Defence in depth: the event-source filter (infra) is the primary guard.
+    // Anything that is not a new outbox row is skipped, not retried.
+    const pk = record.dynamodb?.Keys?.PK?.S;
+    if (record.eventName !== 'INSERT' || !pk?.startsWith('OUTBOX#')) {
+      logger.info('Record skipped', { sequenceNumber, eventName: record.eventName });
+      continue;
+    }
     try {
       const image = unmarshall(record.dynamodb?.NewImage as unknown as Record<string, AttributeValue>);
       const domainEvent = parseEvent(image.event);

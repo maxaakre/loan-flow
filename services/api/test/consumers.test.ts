@@ -25,7 +25,11 @@ const streamOf = (...events: unknown[]): DynamoDBStreamEvent =>
   ({
     Records: events.map((event, i) => ({
       eventName: 'INSERT',
-      dynamodb: { SequenceNumber: `seq-${i}`, NewImage: marshall({ PK: `OUTBOX#${i}`, SK: 'META', event }) },
+      dynamodb: {
+        SequenceNumber: `seq-${i}`,
+        Keys: marshall({ PK: `OUTBOX#${i}`, SK: 'META' }),
+        NewImage: marshall({ PK: `OUTBOX#${i}`, SK: 'META', event }),
+      },
     })),
   }) as unknown as DynamoDBStreamEvent;
 
@@ -47,9 +51,23 @@ describe('outbox-relay', () => {
   it('stops at the first failure and asks the stream to retry from there', async () => {
     eb.on(PutEventsCommand)
       .resolvesOnce({ FailedEntryCount: 0, Entries: [{}] })
-      .resolvesOnce({ FailedEntryCount: 1, Entries: [{ ErrorCode: 'InternalFailure' }] });
-    const res = await relay(streamOf(disbursed, signed));
+      .resolvesOnce({ FailedEntryCount: 1, Entries: [{ ErrorCode: 'InternalFailure' }] })
+      .resolves({ FailedEntryCount: 0, Entries: [{}] });
+    const res = await relay(streamOf(disbursed, signed, disbursed));
     expect(res.batchItemFailures).toEqual([{ itemIdentifier: 'seq-1' }]);
+    expect(eb.commandCalls(PutEventsCommand)).toHaveLength(2);
+  });
+
+  it('skips REMOVE records and non-outbox rows without failing the batch', async () => {
+    const [insert] = streamOf(disbursed).Records;
+    const remove = { ...insert!, eventName: 'REMOVE' };
+    const other = {
+      ...insert!,
+      dynamodb: { ...insert!.dynamodb, Keys: marshall({ PK: 'APP#1', SK: 'META' }) },
+    };
+    const res = await relay({ Records: [remove, other] } as unknown as DynamoDBStreamEvent);
+    expect(res.batchItemFailures).toEqual([]);
+    expect(eb.commandCalls(PutEventsCommand)).toHaveLength(0);
   });
 });
 
