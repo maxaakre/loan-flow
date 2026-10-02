@@ -91,13 +91,14 @@ Any amount over 1 000 000 kr goes to manual review.
                        (loan process)        │
                                 │            │ Streams (outbox rows only)
                                 │            ▼
-                                │      EventBridge Pipe
+                                │      outbox-relay Lambda
                                 │            ▼
                                 │      EventBridge bus
-                                │        │          │
-                                │       SQS        SQS     (each with DLQ)
-                                │        ▼          ▼
-                                │    timeline   notifications
+                                │        │          │           │
+                                │       SQS        SQS         SQS     (each with DLQ)
+                                │        ▼          ▼           ▼
+                                │    timeline   notifications  start-process
+                                │                              (ApplicationSubmitted → StartExecution)
                                 ▼
                          Fake services (company registry, bank)
 ```
@@ -110,15 +111,16 @@ new consumers can be added without touching the process).
 
 | Component | Kind | Job |
 |---|---|---|
-| `applications-api` | Lambda | `POST /api/applications`, `GET /api/applications/{id}`, `POST /api/applications/{id}/sign`, `GET /api/applications/{id}/events` |
+| `applications-api` | Lambda | `POST /api/applications`, `GET /api/applications/{id}`, `POST /api/applications/{id}/sign`, `GET /api/applications/{id}/events`. Never starts the process itself (no dual write). |
+| `start-process` | Lambda via SQS | On `ApplicationSubmitted`: `StartExecution` named after the application id |
 | `loans-api` | Lambda | `GET /api/loans/{id}`, `POST /api/loans/{id}/payments` |
 | `companies-api` | Lambda | `GET /api/companies` (the test list) |
 | `internal-api` | Lambda | `GET /internal/*` read routes for MCP. IAM auth. |
 | `LoanApplication` | Step Functions (Standard) | The loan process, see 4.2 |
-| step Lambdas | Lambda | `fetch-company`, `assess-credit`, `create-offer`, `mark-signed`, `mark-expired`, `mark-manual-review`, `disburse` |
-| `fake-registry` | Lambda | Returns company data. Random latency. `Långsam Data AB` always times out. |
-| `fake-bank` | Lambda + table rows | Payout with idempotency key. Same key → same payout id. |
-| outbox pipe | EventBridge Pipe | DynamoDB Stream (filter: new `OUTBOX#` rows) → bus |
+| step Lambdas | Lambda | `fetch-company`, `assess-credit`, `create-offer` (waits for task token), `set-status` (SIGNED / EXPIRED / MANUAL_REVIEW), `disburse` |
+| fake registry | module in `services/api` | Returns company data. Random latency. `Långsam Data AB` always fails. |
+| fake bank | module + table rows | Payout with idempotency key. Same key → same payout id. |
+| `outbox-relay` | Lambda on DynamoDB Stream | Filter: `INSERT` of `OUTBOX#` rows → `PutEvents`. Partial batch failure, bisect, DLQ. |
 | `timeline-consumer` | Lambda via SQS | Writes `EVT#` rows for the UI |
 | `notifications-consumer` | Lambda via SQS | Logs a fake email per relevant event |
 | `web` | S3 + CloudFront | React app; `/api/*` routed to API Gateway |
@@ -165,11 +167,11 @@ MarkManualReview ──► end                           ├─ MANUAL_REVIEW �
 | Item | PK | SK | Fields |
 |---|---|---|---|
 | Application | `APP#<id>` | `META` | status, orgNr, companyName, amount, termMonths, decision, offer, taskToken, version, createdAt |
-| Loan | `LOAN#<id>` | `META` | applicationId, principal, monthlyFee, schedule, balance, nextInstalment, status, version |
+| Loan | `LOAN#<id>` | `META` | applicationId, correlationId, principal, schedule, paidInstalments, balance, status, payoutId, version. The loan id is the application id. |
 | Ledger entry | `LOAN#<id>` | `ENTRY#<ts>#<entryId>` | lines `[{ account, debit, credit }]`, reason, eventId |
 | Idempotency | `IDEMP#<key>` | `META` | requestHash, response, TTL 24 h |
 | Outbox | `OUTBOX#<eventId>` | `META` | the event envelope, TTL 24 h |
-| Timeline | `APP#<id>` | `EVT#<seq>#<eventId>` | type, occurredAt, summary |
+| Timeline | `APP#<id>` | `EVT#<eventId>` | type, occurredAt, sequence, summary |
 | Notification dedupe | `NOTIF#<eventId>` | `META` | TTL 7 days |
 | Fake bank payout | `BANKPAYOUT#<key>` | `META` | payoutId, amount |
 
@@ -224,7 +226,7 @@ type DomainEvent<T extends string, D> = {
   version: 1;             // schema version of this event type
   occurredAt: string;     // ISO 8601
   aggregateId: string;    // application id
-  sequence: number;       // per-aggregate, from the aggregate version
+  sequence: number;       // aggregate version × 10 + index within the write
   correlationId: string;  // follows one application through every service
   data: D;
 };
@@ -242,9 +244,13 @@ Schemas are zod schemas in `core`, shared by producers and consumers.
 
 - A state change and its outbox row are written in **one transaction**.
 - The DynamoDB Stream is filtered to `INSERT` of `OUTBOX#` rows only.
-- The Pipe sends the event to the bus with `detail-type = type`,
-  `source = loanflow.applications` or `loanflow.loans`.
-- No code calls `PutEvents` directly.
+- `outbox-relay` sends each event to the bus with `detail-type = type`,
+  `source = loanflow`. If `PutEvents` fails, the record is retried
+  (duplicates are fine: consumers are idempotent).
+- Only `outbox-relay` calls `PutEvents`. Business code only writes outbox rows.
+- Why a Lambda and not EventBridge Pipes: Pipes cannot unmarshal the
+  DynamoDB item into a clean event without an enrichment Lambda anyway, so a
+  plain stream Lambda is fewer moving parts.
 
 ## 7. Failure handling
 
@@ -252,8 +258,8 @@ Schemas are zod schemas in `core`, shared by producers and consumers.
 
 - Streams, Pipes, EventBridge and SQS are all **at-least-once**, and
   EventBridge does not keep order. We build **exactly-once in effect**.
-- **Timeline consumer:** conditional put on the `EVT#` key → duplicates are ignored.
-  Sorted by `sequence`, so arrival order does not matter.
+- **Timeline consumer:** conditional put on the `EVT#<eventId>` key → duplicates
+  are ignored. Sorted by `occurredAt`, then `sequence`, so arrival order does not matter.
 - **Notifications consumer:** conditional put of `NOTIF#<eventId>` before
   "sending" → no double emails.
 - SQS: `ReportBatchItemFailures`, `maxReceiveCount = 3`, then DLQ.
@@ -303,7 +309,7 @@ the same payout. If the condition fails because status is already
 ## 8. Credit rules
 
 - A pure function in `core`: `assess(company, request) → Decision`.
-- `Decision = { outcome, reasons: ReasonCode[], rulesVersion, riskBand, maxAmount? }`.
+- `Decision = { outcome, reasons: ReasonCode[], rulesVersion, riskBand, approvedAmount?, inputs }`.
 - `outcome`: `APPROVED`, `APPROVED_WITH_CHANGES`, `DECLINED`, `MANUAL_REVIEW`.
 - `rulesVersion` is stored with every decision.
 
@@ -378,7 +384,7 @@ pnpm workspaces, TypeScript strict, ESLint, Prettier. Region `eu-north-1`.
 ## 14. Decision notes (ADRs) to write
 
 1. Orchestration inside the process, choreography between parts.
-2. Transactional outbox with DynamoDB Streams + EventBridge Pipes.
+2. Transactional outbox with DynamoDB Streams + a relay Lambda (and why not Pipes).
 3. Exactly-once in effect: idempotency everywhere.
 4. Double-entry, append-only ledger in DynamoDB (and what we give up vs Postgres).
 5. Step Functions as the arbiter for the signing race.
