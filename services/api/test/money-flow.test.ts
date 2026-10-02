@@ -2,8 +2,9 @@ import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactW
 import { buildOffer, kr, type LedgerEntry } from '@loanflow/core';
 import { mockClient } from 'aws-sdk-client-mock';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { ConditionFailedError } from '../src/db/client';
+import { ConditionFailedError, TransactionConflictError } from '../src/db/client';
 import { payout } from '../src/fakes/bank';
+import { requestHash } from '../src/http';
 import { handler as loans } from '../src/handlers/loans-api';
 import { handler as disburse } from '../src/steps/disburse';
 import { aLoan, anApplication, apiEvent, APP_ID, lambdaContext, lastTransaction, outboxEvents, parse } from './fixtures';
@@ -33,6 +34,10 @@ describe('disburse', () => {
     expect(items[1]!.Put!.Item).toMatchObject({ PK: `LOAN#${APP_ID}`, balance: kr(120_000), status: 'ACTIVE' });
     const entry = items[2]!.Put!.Item as LedgerEntry;
     expect(entry.reason).toBe('PAYOUT');
+    const line = (account: string) => entry.lines.find((l) => l.account === account)!;
+    expect(line('LOAN_RECEIVABLE').debit).toBe(kr(120_000));
+    expect(line('BANK_PAYOUT').credit).toBe(kr(120_000));
+    expect(ddb.commandCalls(PutCommand)[0]!.args[0].input.Item).toMatchObject({ PK: `BANKPAYOUT#${APP_ID}` });
     expect(outboxEvents(items).map((e) => e.type)).toEqual(['LoanDisbursed']);
   });
 
@@ -74,6 +79,41 @@ describe('loans API', () => {
       body: { instalmentNumber: 1, amount: first.total, balance: loan.balance - first.principal, status: 'ACTIVE' },
     });
     expect(outboxEvents(lastTransaction(ddb)).map((e) => e.type)).toEqual(['PaymentReceived']);
+    const items = lastTransaction(ddb);
+    expect(items[0]!.Update!.ConditionExpression).toBe('#ver = :expected');
+    const entry = items[1]!.Put!.Item as LedgerEntry;
+    const line = (account: string) => entry.lines.find((l) => l.account === account)!;
+    expect(line('BANK_INCOMING').debit).toBe(line('LOAN_RECEIVABLE').credit + line('FEE_INCOME').credit);
+    expect(line('BANK_INCOMING').debit).toBe(first.total);
+  });
+
+  it('replays a stored result without writing again', async () => {
+    const stored = { status: 201, body: { loanId: APP_ID, instalmentNumber: 1 } };
+    const hash = requestHash({ route: 'POST /api/loans/{id}/payments', id: APP_ID });
+    ddb.on(GetCommand).callsFake(async (input) =>
+      input.Key.PK.startsWith('IDEMP#') ? { Item: { requestHash: hash, result: stored } } : { Item: aLoan() },
+    );
+    expect(await pay()).toMatchObject(stored);
+    expect(ddb.commandCalls(TransactWriteCommand)).toHaveLength(0);
+  });
+
+  it('returns the winner\'s answer when a parallel request with the same key committed first', async () => {
+    const winner = { status: 201, body: { loanId: APP_ID, instalmentNumber: 1 } };
+    const hash = requestHash({ route: 'POST /api/loans/{id}/payments', id: APP_ID });
+    let idempReads = 0;
+    ddb.on(GetCommand).callsFake(async (input) => {
+      if (!input.Key.PK.startsWith('IDEMP#')) return { Item: aLoan() };
+      return ++idempReads === 1 ? {} : { Item: { requestHash: hash, result: winner } };
+    });
+    // items: loan update, ledger entry, one event, idempotency record (last)
+    ddb.on(TransactWriteCommand).rejects(new ConditionFailedError([0, 3]));
+    expect(await pay()).toMatchObject(winner);
+  });
+
+  it('answers 409 when DynamoDB reports a transaction conflict', async () => {
+    storedLoan(aLoan());
+    ddb.on(TransactWriteCommand).rejects(new TransactionConflictError());
+    expect(await pay()).toMatchObject({ status: 409, body: { detail: 'Lånet ändrades samtidigt. Försök igen.' } });
   });
 
   it('closes the loan on the last instalment', async () => {
