@@ -1,0 +1,10 @@
+node_modules/
+dist/
+cdk.out/
+coverage/
+playwright-report/
+test-results/
+infra/cdk-outputs.json
+infra/diff.txt
+infra/diff.md
+.DS_Store
