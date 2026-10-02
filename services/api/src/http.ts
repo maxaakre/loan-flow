@@ -85,7 +85,7 @@ export function httpHandler(fn: (event: APIGatewayProxyEventV2, ctx: RequestCont
       logger.error('Unexpected error', err as Error);
       return problem(500, 'Internal error', 'Något gick fel. Försök igen.');
     } finally {
-      metrics.publishStoredMetrics();
+      if (metrics.hasStoredMetrics()) metrics.publishStoredMetrics();
       logger.resetKeys();
     }
   };

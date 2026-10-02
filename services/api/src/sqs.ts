@@ -24,7 +24,7 @@ export function sqsBatch(fn: (detail: unknown, record: SQSRecord) => Promise<voi
         }
       }
     } finally {
-      metrics.publishStoredMetrics();
+      if (metrics.hasStoredMetrics()) metrics.publishStoredMetrics();
     }
     return { batchItemFailures };
   };
