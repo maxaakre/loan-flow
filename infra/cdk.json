@@ -1,0 +1,7 @@
+{
+  "app": "npx tsx bin/app.ts",
+  "context": {
+    "offerTimeoutSeconds": "604800",
+    "githubSubjectPrefix": "repo:maxaakre@36918283/loan-flow@1401563715"
+  }
+}
