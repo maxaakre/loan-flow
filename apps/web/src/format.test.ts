@@ -13,6 +13,11 @@ describe('toOre (Review Focus 5)', () => {
     expect(toOre('abc').ok).toBe(false);
   });
 
+  it('rejects absurdly long input without throwing', () => {
+    expect(() => toOre('99999999999999999999')).not.toThrow();
+    expect(toOre('99999999999999999999').ok).toBe(false);
+  });
+
   it('has a Swedish label for every status', () => {
     expect(STATUS_SV.MANUAL_REVIEW).toBe('Manuell granskning');
   });
