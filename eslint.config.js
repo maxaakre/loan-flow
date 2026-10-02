@@ -6,6 +6,7 @@ export default tseslint.config(
   { ignores: ['**/dist/**', '**/cdk.out/**', '**/node_modules/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  { rules: { '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^_' }] } },
   {
     files: ['apps/web/**/*.tsx'],
     plugins: { 'react-hooks': reactHooks },
