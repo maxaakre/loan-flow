@@ -32,12 +32,14 @@ jobs:
           aws-region: eu-north-1
 
       - name: cdk diff
+        env:
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
         if: github.event_name == 'pull_request'
         shell: bash
         working-directory: infra
         run: |
           pnpm exec cdk diff LoanFlow --no-change-set \
-            -c alertEmail=${{ vars.ALERT_EMAIL }} -c offerTimeoutSeconds=${{ vars.OFFER_TIMEOUT_SECONDS }} 2>&1 | tee diff.txt
+            -c alertEmail="$ALERT_EMAIL" -c offerTimeoutSeconds=${{ vars.OFFER_TIMEOUT_SECONDS }} 2>&1 | tee diff.txt
           { echo '### cdk diff'; echo '```'; cat diff.txt; echo '```'; } > diff.md
 
       - uses: marocchino/sticky-pull-request-comment@v2

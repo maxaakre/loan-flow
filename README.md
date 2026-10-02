@@ -95,7 +95,8 @@ In a new session ask: *"Which applications are in manual review, and why?"*
 
 The PR workflow runs lint, typecheck and tests, and posts a `cdk diff`. It needs:
 
-- **GitHub variables** (Settings → Secrets and variables → Actions → Variables): `AWS_ACCOUNT_ID`, `ALERT_EMAIL`, `OFFER_TIMEOUT_SECONDS`.
+- **GitHub variables** (Settings → Secrets and variables → Actions → Variables): `AWS_ACCOUNT_ID`, `OFFER_TIMEOUT_SECONDS`.
+- **GitHub secret:** `ALERT_EMAIL` (a secret, so the address is masked in the public Actions logs).
 - **One-time deploy** of the OIDC role the workflow assumes (no stored AWS keys):
 
 ```bash

@@ -31,10 +31,12 @@ jobs:
           aws-region: eu-north-1
 
       - name: cdk deploy
+        env:
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
         working-directory: infra
         run: |
           pnpm exec cdk deploy LoanFlow --require-approval never \
-            -c alertEmail=${{ vars.ALERT_EMAIL }} -c offerTimeoutSeconds=${{ vars.OFFER_TIMEOUT_SECONDS }} \
+            -c alertEmail="$ALERT_EMAIL" -c offerTimeoutSeconds=${{ vars.OFFER_TIMEOUT_SECONDS }} \
             --outputs-file cdk-outputs.json
           echo "SITE_URL=$(jq -r '.LoanFlow.SiteUrl' cdk-outputs.json)" >> "$GITHUB_ENV"
           echo "API_URL=$(jq -r '.LoanFlow.ApiUrl' cdk-outputs.json)" >> "$GITHUB_ENV"
