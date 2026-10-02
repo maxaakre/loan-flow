@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { ConditionFailedError } from '../src/db/client';
 import { replayOrThrow } from '../src/db/idempotency';
-import { HttpError, httpHandler, idempotencyKey, parseBody, requestHash } from '../src/http';
+import { HttpError, httpHandler, idempotencyKey, parseBody, requestHash, routeHandler } from '../src/http';
 import { sqsBatch } from '../src/sqs';
 import { apiEvent, lambdaContext, parse } from './fixtures';
 
@@ -14,6 +14,19 @@ beforeEach(() => ddb.reset());
 
 const run = (handler: ReturnType<typeof httpHandler>, headers?: Record<string, string>) =>
   handler(apiEvent({ routeKey: 'GET /x', headers }), lambdaContext).then(parse);
+
+describe('routeHandler', () => {
+  const handler = routeHandler({ 'GET /x': async () => ({ status: 200, body: 'x' }) });
+
+  it('dispatches on the route key', async () => {
+    expect(await run(handler)).toMatchObject({ status: 200, body: 'x' });
+  });
+
+  it('answers 404 problem+json for an unknown route', async () => {
+    const res = parse(await handler(apiEvent({ routeKey: 'GET /y' }), lambdaContext));
+    expect(res).toMatchObject({ status: 404, contentType: 'application/problem+json', body: { detail: 'Hittades inte.' } });
+  });
+});
 
 describe('httpHandler', () => {
   it('returns the result as JSON', async () => {

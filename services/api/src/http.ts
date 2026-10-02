@@ -22,6 +22,9 @@ export class HttpError extends Error {
 
 export type HttpResult = { status: number; body: unknown };
 export type RequestContext = { correlationId: string; now: Date };
+export type Route = (event: APIGatewayProxyEventV2, ctx: RequestContext) => Promise<HttpResult>;
+
+export const notFound = (detail = 'Hittades inte.') => new HttpError(404, 'Not found', detail);
 
 export function parseBody<T>(event: APIGatewayProxyEventV2, schema: ZodType<T>): T {
   const raw = event.isBase64Encoded && event.body ? Buffer.from(event.body, 'base64').toString('utf8') : event.body;
@@ -41,7 +44,7 @@ export function parseBody<T>(event: APIGatewayProxyEventV2, schema: ZodType<T>):
 
 export function pathId(event: APIGatewayProxyEventV2): string {
   const id = event.pathParameters?.id;
-  if (!id || !ID_PATTERN.test(id)) throw new HttpError(404, 'Not found', 'Hittades inte.');
+  if (!id || !ID_PATTERN.test(id)) throw notFound();
   return id;
 }
 
@@ -91,3 +94,11 @@ export function httpHandler(fn: (event: APIGatewayProxyEventV2, ctx: RequestCont
     }
   };
 }
+
+/** One Lambda per area: dispatch on the API Gateway route key, 404 for anything else. */
+export const routeHandler = (routes: Record<string, Route>) =>
+  httpHandler((event, ctx) => {
+    const route = routes[event.routeKey];
+    if (!route) throw notFound();
+    return route(event, ctx);
+  });

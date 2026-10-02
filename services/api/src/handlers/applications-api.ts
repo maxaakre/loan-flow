@@ -14,23 +14,25 @@ import {
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { ulid } from 'ulid';
 import { z } from 'zod';
-import { eventMeta, getApplication, listTimeline, putApplication } from '../db/applications';
+import { eventMeta, getApplication, putApplication } from '../db/applications';
 import { transact } from '../db/client';
 import { countApplication } from '../db/daily-cap';
 import { checkIdempotency, idempotencyPut, rememberResult, replayOrThrow } from '../db/idempotency';
 import { outboxPut } from '../db/outbox';
 import {
   HttpError,
-  httpHandler,
   idempotencyKey,
   metrics,
+  notFound,
   parseBody,
   pathId,
   requestHash,
+  routeHandler,
   tracer,
   type HttpResult,
   type RequestContext,
 } from '../http';
+import { timelineEvents } from './shared';
 
 const sfn = tracer.captureAWSv3Client(new SFNClient({}));
 
@@ -40,7 +42,7 @@ const CreateApplication = z.object({
   termMonths: z.literal([...TERMS]),
 });
 
-const notFound = () => new HttpError(404, 'Not found', 'Ansökan hittades inte.');
+const APP_NOT_FOUND = 'Ansökan hittades inte.';
 
 async function create(event: APIGatewayProxyEventV2, ctx: RequestContext): Promise<HttpResult> {
   const body = parseBody(event, CreateApplication);
@@ -89,12 +91,8 @@ async function create(event: APIGatewayProxyEventV2, ctx: RequestContext): Promi
 
 async function get(event: APIGatewayProxyEventV2): Promise<HttpResult> {
   const app = await getApplication(pathId(event));
-  if (!app) throw notFound();
+  if (!app) throw notFound(APP_NOT_FOUND);
   return { status: 200, body: toCustomerApplication(app) };
-}
-
-async function events(event: APIGatewayProxyEventV2): Promise<HttpResult> {
-  return { status: 200, body: await listTimeline(pathId(event)) };
 }
 
 const EXPIRED = 'Erbjudandet har gått ut';
@@ -114,7 +112,7 @@ async function resume(taskToken: string, ctx: RequestContext): Promise<boolean> 
 /** The token we tried is gone. Re-read the application to learn why; throws 409 unless it was signed. */
 async function afterTokenGone(id: string, tried: string, ctx: RequestContext): Promise<void> {
   const app = await getApplication(id);
-  if (!app) throw notFound();
+  if (!app) throw notFound(APP_NOT_FOUND);
   if (app.status === 'SIGNED' || app.status === 'DISBURSED') return;
   // create-offer was retried and stored a new token: the old one never reached the customer's offer
   if (app.status === 'OFFERED' && app.taskToken && app.taskToken !== tried) {
@@ -144,7 +142,7 @@ async function sign(event: APIGatewayProxyEventV2, ctx: RequestContext): Promise
 
   const accepted: HttpResult = { status: 202, body: { id, status: 'SIGNING' } };
   const app = await getApplication(id);
-  if (!app) throw notFound();
+  if (!app) throw notFound(APP_NOT_FOUND);
   // A retry after a lost response must succeed: the earlier sign already went through.
   if (app.status === 'SIGNED' || app.status === 'DISBURSED') {
     await rememberResult(key, hash, accepted);
@@ -161,16 +159,9 @@ async function sign(event: APIGatewayProxyEventV2, ctx: RequestContext): Promise
   return accepted;
 }
 
-type Route = (event: APIGatewayProxyEventV2, ctx: RequestContext) => Promise<HttpResult>;
-const routes: Record<string, Route> = {
+export const handler = routeHandler({
   'POST /api/applications': create,
   'GET /api/applications/{id}': get,
-  'GET /api/applications/{id}/events': events,
+  'GET /api/applications/{id}/events': timelineEvents,
   'POST /api/applications/{id}/sign': sign,
-};
-
-export const handler = httpHandler((event, ctx) => {
-  const route = routes[event.routeKey];
-  if (!route) throw new HttpError(404, 'Not found', 'Hittades inte.');
-  return route(event, ctx);
 });

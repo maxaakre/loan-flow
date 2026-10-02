@@ -9,21 +9,22 @@ import { getLoan, listLedger, putLedgerEntry, updateLoan } from '../db/loans';
 import { outboxPut } from '../db/outbox';
 import {
   HttpError,
-  httpHandler,
   idempotencyKey,
   metrics,
+  notFound,
   pathId,
   requestHash,
+  routeHandler,
   type HttpResult,
   type RequestContext,
 } from '../http';
 
-const notFound = () => new HttpError(404, 'Not found', 'Lånet hittades inte.');
+const LOAN_NOT_FOUND = 'Lånet hittades inte.';
 
 async function get(event: APIGatewayProxyEventV2): Promise<HttpResult> {
   const id = pathId(event);
   const loan = await getLoan(id);
-  if (!loan) throw notFound();
+  if (!loan) throw notFound(LOAN_NOT_FOUND);
   return { status: 200, body: { loan, ledger: await listLedger(id) } };
 }
 
@@ -36,7 +37,7 @@ async function pay(event: APIGatewayProxyEventV2, ctx: RequestContext): Promise<
   if (check.kind === 'replay') return check.result;
 
   const loan = await getLoan(id);
-  if (!loan) throw notFound();
+  if (!loan) throw notFound(LOAN_NOT_FOUND);
   const instalment = nextInstalment(loan);
   if (loan.status === 'REPAID' || !instalment) throw new HttpError(409, 'Loan repaid', 'Lånet är redan återbetalt.');
 
@@ -77,14 +78,7 @@ async function pay(event: APIGatewayProxyEventV2, ctx: RequestContext): Promise<
   return result;
 }
 
-type Route = (event: APIGatewayProxyEventV2, ctx: RequestContext) => Promise<HttpResult>;
-const routes: Record<string, Route> = {
+export const handler = routeHandler({
   'GET /api/loans/{id}': get,
   'POST /api/loans/{id}/payments': pay,
-};
-
-export const handler = httpHandler((event, ctx) => {
-  const route = routes[event.routeKey];
-  if (!route) throw new HttpError(404, 'Not found', 'Hittades inte.');
-  return route(event, ctx);
 });

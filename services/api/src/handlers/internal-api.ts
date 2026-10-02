@@ -1,13 +1,13 @@
 import { APPLICATION_STATUSES, receivableBalance, toPublicApplication } from '@loanflow/core';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { z } from 'zod';
-import { getApplication, listApplicationsByStatus, listTimeline } from '../db/applications';
+import { getApplication, listApplicationsByStatus } from '../db/applications';
 import { getLoan, listLedger } from '../db/loans';
-import { HttpError, httpHandler, pathId, type HttpResult } from '../http';
+import { HttpError, notFound, pathId, routeHandler, type HttpResult } from '../http';
+import { timelineEvents } from './shared';
 
 // Read-only by design: nothing here can decide, sign or pay
 const StatusQuery = z.enum(APPLICATION_STATUSES);
-const notFound = (what: string) => new HttpError(404, 'Not found', `${what} not found`);
 
 async function list(event: APIGatewayProxyEventV2): Promise<HttpResult> {
   const status = StatusQuery.safeParse(event.queryStringParameters?.status ?? 'MANUAL_REVIEW');
@@ -28,14 +28,14 @@ async function list(event: APIGatewayProxyEventV2): Promise<HttpResult> {
 
 async function get(event: APIGatewayProxyEventV2): Promise<HttpResult> {
   const app = await getApplication(pathId(event));
-  if (!app) throw notFound('Application');
+  if (!app) throw notFound('Application not found');
   return { status: 200, body: toPublicApplication(app) };
 }
 
 async function decision(event: APIGatewayProxyEventV2): Promise<HttpResult> {
   const app = await getApplication(pathId(event));
-  if (!app) throw notFound('Application');
-  if (!app.decision && !app.manualReviewReason) throw notFound('Decision');
+  if (!app) throw notFound('Application not found');
+  if (!app.decision && !app.manualReviewReason) throw notFound('Decision not found');
   return {
     status: 200,
     body: {
@@ -47,28 +47,18 @@ async function decision(event: APIGatewayProxyEventV2): Promise<HttpResult> {
   };
 }
 
-async function events(event: APIGatewayProxyEventV2): Promise<HttpResult> {
-  return { status: 200, body: await listTimeline(pathId(event)) };
-}
-
 async function ledger(event: APIGatewayProxyEventV2): Promise<HttpResult> {
   const id = pathId(event);
   const loan = await getLoan(id);
-  if (!loan) throw notFound('Loan');
+  if (!loan) throw notFound('Loan not found');
   const entries = await listLedger(id);
   return { status: 200, body: { loan, entries, balanceFromLedger: receivableBalance(entries) } };
 }
 
-const routes: Record<string, (event: APIGatewayProxyEventV2) => Promise<HttpResult>> = {
+export const handler = routeHandler({
   'GET /internal/applications': list,
   'GET /internal/applications/{id}': get,
   'GET /internal/applications/{id}/decision': decision,
-  'GET /internal/applications/{id}/events': events,
+  'GET /internal/applications/{id}/events': timelineEvents,
   'GET /internal/loans/{id}/ledger': ledger,
-};
-
-export const handler = httpHandler((event) => {
-  const route = routes[event.routeKey];
-  if (!route) throw new HttpError(404, 'Not found', 'Not found');
-  return route(event);
 });
