@@ -68,18 +68,41 @@ describe('consumers', () => {
 });
 
 describe('loan process', () => {
-  const definition = () => JSON.stringify(Object.values(template.findResources('AWS::StepFunctions::StateMachine'))[0]);
+  type State = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  /** The definition is an Fn::Join of strings and tokens; tokens (ARNs) become a placeholder. */
+  const states = (): Record<string, State> => {
+    const sm = Object.values(template.findResources('AWS::StepFunctions::StateMachine'))[0]!;
+    const parts: unknown[] = sm.Properties.DefinitionString['Fn::Join'][1];
+    const json = parts.map((p) => (typeof p === 'string' ? p : 'ARN')).join('');
+    return JSON.parse(json).States;
+  };
 
   it('retries the registry with jitter, then falls back to manual review', () => {
-    expect(definition()).toContain('RegistryUnavailableError');
-    expect(definition()).toContain('\\"JitterStrategy\\":\\"FULL\\"');
-    expect(definition()).toContain('Mark manual review');
+    const fetch = states()['Fetch company']!;
+    expect(fetch.Retry).toContainEqual(
+      expect.objectContaining({
+        ErrorEquals: ['RegistryUnavailableError'],
+        JitterStrategy: 'FULL',
+        BackoffRate: 2,
+        MaxAttempts: 3,
+      }),
+    );
+    expect(fetch.Catch).toContainEqual(
+      expect.objectContaining({ ErrorEquals: ['RegistryUnavailableError'], Next: 'Mark manual review' }),
+    );
   });
 
   it('waits for a task token and expires on timeout', () => {
-    expect(definition()).toContain('waitForTaskToken');
-    expect(definition()).toContain('\\"TimeoutSeconds\\":300');
-    expect(definition()).toContain('States.Timeout');
+    const wait = states()['Create offer and wait for signature']!;
+    expect(wait.TimeoutSeconds).toBe(300);
+    expect(wait.Resource).toMatch(/\.waitForTaskToken$/);
+    expect(wait.Parameters.Payload).toHaveProperty(['taskToken.$']);
+    expect(wait.Parameters.Payload).toHaveProperty(['applicationId.$']);
+    expect(wait.Catch).toContainEqual(expect.objectContaining({ ErrorEquals: ['States.Timeout'], Next: 'Mark expired' }));
+  });
+
+  it('passes the signing time on to the status update', () => {
+    expect(states()['Mark signed']!.Parameters['signedAt.$']).toBe('$.signature.signedAt');
   });
 
   it('is a Standard workflow with tracing', () => {
