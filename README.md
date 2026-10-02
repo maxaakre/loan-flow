@@ -61,9 +61,11 @@ stateDiagram-v2
 ```bash
 pnpm install
 pnpm test                         # all unit, property and CDK tests
-aws login                         # short-lived credentials, no keys
+aws login --profile loanflow      # short-lived credentials, no keys
+export AWS_PROFILE=loanflow
 pnpm --filter @loanflow/web build
-cd infra && pnpm exec cdk deploy LoanFlow -c alertEmail=you@example.com -c offerTimeoutSeconds=300
+(cd infra && pnpm exec cdk deploy LoanFlow -c alertEmail=you@example.com -c offerTimeoutSeconds=300)
+scripts/create-budget.sh you@example.com   # once per account: $5/month cost alert
 ```
 
 Smoke test: `pnpm exec tsx scripts/smoke.ts <SiteUrl> <ApiUrl>`.

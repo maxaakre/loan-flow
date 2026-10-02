@@ -1,4 +1,4 @@
-import { Match, type Template } from 'aws-cdk-lib/assertions';
+import type { Template } from 'aws-cdk-lib/assertions';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { policiesWith, synth } from './helpers';
 
@@ -66,9 +66,7 @@ describe('monitoring', () => {
     for (const a of alarms) expect(a.AlarmActions).toHaveLength(1);
   });
 
-  it('has a $5 budget alert', () => {
-    template.hasResourceProperties('AWS::Budgets::Budget', {
-      Budget: Match.objectLike({ BudgetLimit: { Amount: 5, Unit: 'USD' }, BudgetType: 'COST' }),
-    });
+  it('has no budget resource (CloudFormation only supports it in us-east-1; see scripts/create-budget.sh)', () => {
+    expect(Object.keys(template.findResources('AWS::Budgets::Budget'))).toHaveLength(0);
   });
 });

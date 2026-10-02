@@ -1,6 +1,5 @@
 import { Duration } from 'aws-cdk-lib';
 import type { HttpApi } from 'aws-cdk-lib/aws-apigatewayv2';
-import * as budgets from 'aws-cdk-lib/aws-budgets';
 import * as cw from 'aws-cdk-lib/aws-cloudwatch';
 import * as actions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import type { IFunction } from 'aws-cdk-lib/aws-lambda';
@@ -48,20 +47,8 @@ export class MonitoringConstruct extends Construct {
     alarm(props.api.metricServerError({ period }), 'Api5xx', 5, 'API is returning 5xx errors');
     // No per-Lambda error alarms: fetch-company throws by design while the registry is down (handled by the process)
 
-    // Spend guard: free tier should keep this near zero
-    new budgets.CfnBudget(this, 'Budget', {
-      budget: { budgetName: 'loanflow-monthly', budgetType: 'COST', timeUnit: 'MONTHLY', budgetLimit: { amount: 5, unit: 'USD' } },
-      notificationsWithSubscribers: [
-        {
-          notification: { notificationType: 'ACTUAL', comparisonOperator: 'GREATER_THAN', threshold: 80, thresholdType: 'PERCENTAGE' },
-          subscribers: [{ subscriptionType: 'EMAIL', address: props.alertEmail }],
-        },
-        {
-          notification: { notificationType: 'FORECASTED', comparisonOperator: 'GREATER_THAN', threshold: 100, thresholdType: 'PERCENTAGE' },
-          subscribers: [{ subscriptionType: 'EMAIL', address: props.alertEmail }],
-        },
-      ],
-    });
+    // The $5 spend guard lives in scripts/create-budget.sh: CloudFormation only
+    // supports AWS::Budgets::Budget in us-east-1, and this stack is in eu-north-1.
 
     const dashboard = new cw.Dashboard(this, 'Dashboard', { dashboardName: 'LoanFlow' });
     dashboard.addWidgets(
