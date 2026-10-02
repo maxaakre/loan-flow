@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { signedFetcher } from '../src/client';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe('signedFetcher', () => {
   it('signs GET requests with SigV4 for execute-api', async () => {
@@ -15,6 +18,18 @@ describe('signedFetcher', () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [URL, { headers: Record<string, string> }];
     expect(String(url)).toBe('https://abc.execute-api.eu-north-1.amazonaws.com/internal/applications?status=MANUAL_REVIEW');
     expect(init.headers.authorization).toMatch(/^AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE\/\d{8}\/eu-north-1\/execute-api\//);
+  });
+
+  it('defaults the signing region to AWS_REGION', async () => {
+    vi.stubEnv('AWS_REGION', 'eu-west-1');
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await signedFetcher('https://abc.execute-api.eu-west-1.amazonaws.com', undefined, async () => ({
+      accessKeyId: 'A',
+      secretAccessKey: 'B',
+    }))('/internal/applications');
+    const [, init] = fetchMock.mock.calls[0] as unknown as [URL, { headers: Record<string, string> }];
+    expect(init.headers.authorization).toContain('/eu-west-1/execute-api/');
   });
 
   it('turns an error response into an error with the problem detail', async () => {

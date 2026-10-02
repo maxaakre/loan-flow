@@ -8,7 +8,7 @@ export type Fetcher = (path: string) => Promise<unknown>;
 /** GETs signed with SigV4. No API keys or secrets: it uses the local AWS profile. */
 export function signedFetcher(
   apiUrl: string,
-  region = 'eu-north-1',
+  region = process.env.AWS_REGION ?? 'eu-north-1',
   credentials: AwsCredentialIdentityProvider = fromNodeProviderChain(),
 ): Fetcher {
   const signer = new SignatureV4({ service: 'execute-api', region, credentials, sha256: Sha256 });
