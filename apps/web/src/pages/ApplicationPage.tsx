@@ -14,10 +14,14 @@ const REASON_SV: Record<string, string> = {
   LOW_CASHFLOW: 'Kassaflödet räcker inte för beloppet.',
 };
 
+const FINAL_STATUSES = new Set(['DISBURSED', 'DECLINED', 'EXPIRED', 'MANUAL_REVIEW']);
+const isFinal = ([app]: Awaited<ReturnType<typeof loadBoth>>) => FINAL_STATUSES.has(app.status);
+const loadBoth = (id: string) => Promise.all([api.application(id), api.events(id)]);
+
 export function ApplicationPage() {
   const { id = '' } = useParams();
-  const load = useCallback(() => Promise.all([api.application(id), api.events(id)]), [id]);
-  const { data, error } = usePolling(load, 2000);
+  const load = useCallback(() => loadBoth(id), [id]);
+  const { data, error } = usePolling(load, 2000, isFinal);
   const signAction = useActionKey();
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string>();

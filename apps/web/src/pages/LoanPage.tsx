@@ -1,5 +1,5 @@
 import { formatKr } from '@loanflow/core';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { api } from '../api';
 import { useActionKey } from '../useActionKey';
@@ -8,10 +8,17 @@ import { usePolling } from '../usePolling';
 export function LoanPage() {
   const { id = '' } = useParams();
   const load = useCallback(() => api.loan(id), [id]);
-  const { data, error, refresh } = usePolling(load, 5000);
+  const { data, error, refresh } = usePolling(load, 5000, (d) => d.loan.status === 'REPAID');
   const payAction = useActionKey();
+  const paidInstalments = data?.loan.paidInstalments;
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState<string>();
+
+  // A new instalment was recorded: the next click is a new payment, whatever the previous request did
+  useEffect(() => {
+    payAction.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paidInstalments]);
 
   if (!data) return <p className="muted">{error ?? 'Laddar…'}</p>;
   const { loan, ledger } = data;
