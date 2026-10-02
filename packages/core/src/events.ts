@@ -1,16 +1,10 @@
 import { z } from 'zod';
+import { DECISION_OUTCOMES, REASON_CODES } from './credit';
 import { formatKr, OreSchema } from './money';
 import { TERMS } from './pricing';
 
-const outcome = z.enum(['APPROVED', 'APPROVED_WITH_CHANGES', 'DECLINED', 'MANUAL_REVIEW']);
-const reason = z.enum([
-  'BANKRUPTCY',
-  'PAYMENT_REMARKS',
-  'COMPANY_TOO_YOUNG',
-  'AMOUNT_ABOVE_AUTO_LIMIT',
-  'LOW_CASHFLOW',
-  'REGISTRY_UNAVAILABLE',
-]);
+const outcome = z.enum(DECISION_OUTCOMES);
+const reason = z.enum(REASON_CODES);
 
 /** Shared by producers and consumers. Bump `version` in the envelope if a schema breaks. */
 export const EVENT_SCHEMAS = {
@@ -29,7 +23,7 @@ export const EVENT_SCHEMAS = {
   }),
   OfferCreated: z.object({
     amount: OreSchema,
-    termMonths: z.number().int(),
+    termMonths: z.literal([...TERMS]),
     monthlyFee: OreSchema,
     totalCost: OreSchema,
     expiresAt: z.string(),
@@ -65,8 +59,8 @@ export type DomainEvent<T extends EventType = EventType> = {
 }[T];
 
 export function makeEvent<T extends EventType>(type: T, meta: EventMeta, data: EventData<T>): DomainEvent<T> {
-  EVENT_SCHEMAS[type].parse(data);
-  return { ...meta, type, version: 1, data } as DomainEvent<T>;
+  const parsed = (EVENT_SCHEMAS[type] as z.ZodType).parse(data);
+  return { ...meta, type, version: 1, data: parsed } as DomainEvent<T>;
 }
 
 const envelope = z.object({
@@ -101,7 +95,7 @@ export function summarize(event: DomainEvent): string {
     case 'CompanyDataFetched':
       return `Företagsdata hämtad (${event.data.ageMonths} mån gammalt)`;
     case 'CreditDecided':
-      return event.data.approvedAmount
+      return event.data.approvedAmount !== undefined
         ? `${OUTCOME_SV[event.data.outcome]}: ${formatKr(event.data.approvedAmount)}`
         : OUTCOME_SV[event.data.outcome];
     case 'OfferCreated':

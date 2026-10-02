@@ -5,14 +5,14 @@ export const ACCOUNTS = ['LOAN_RECEIVABLE', 'BANK_PAYOUT', 'BANK_INCOMING', 'FEE
 export type Account = (typeof ACCOUNTS)[number];
 
 /** One side is always zero. */
-export type LedgerLine = { account: Account; debit: Ore; credit: Ore };
+export type LedgerLine = { readonly account: Account; readonly debit: Ore; readonly credit: Ore };
 
 export type LedgerEntry = {
-  entryId: string;
-  loanId: string;
-  occurredAt: string;
-  reason: 'PAYOUT' | 'INSTALMENT';
-  lines: LedgerLine[];
+  readonly entryId: string;
+  readonly loanId: string;
+  readonly occurredAt: string;
+  readonly reason: 'PAYOUT' | 'INSTALMENT';
+  readonly lines: readonly LedgerLine[];
 };
 
 export class UnbalancedEntryError extends Error {
@@ -24,7 +24,9 @@ const debit = (account: Account, amount: Ore): LedgerLine => ({ account, debit: 
 const credit = (account: Account, amount: Ore): LedgerLine => ({ account, debit: zero, credit: amount });
 
 /** Entries are append-only. A mistake is fixed with a new reversing entry, never by editing. */
-function entry(base: Omit<LedgerEntry, 'lines'>, lines: LedgerLine[]): LedgerEntry {
+function entry(base: Omit<LedgerEntry, 'lines'>, lines: readonly LedgerLine[]): LedgerEntry {
+  const invalid = lines.some((l) => l.debit < 0 || l.credit < 0 || (l.debit !== 0 && l.credit !== 0));
+  if (invalid) throw new UnbalancedEntryError(`Entry ${base.entryId} has a negative amount or a line with both debit and credit`);
   const debits = lines.reduce((s, l) => s + l.debit, 0);
   const credits = lines.reduce((s, l) => s + l.credit, 0);
   if (debits !== credits || debits <= 0) {
@@ -46,7 +48,7 @@ export const instalmentEntry = ({ instalment, ...meta }: EntryMeta & { instalmen
   ]);
 
 /** What the customer still owes: debits minus credits on the receivable account. */
-export const receivableBalance = (entries: LedgerEntry[]): Ore =>
+export const receivableBalance = (entries: readonly LedgerEntry[]): Ore =>
   ore(
     entries
       .flatMap((e) => e.lines)

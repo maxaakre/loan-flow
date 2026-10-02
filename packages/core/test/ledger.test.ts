@@ -38,6 +38,16 @@ describe('ledger', () => {
     ).toThrow(UnbalancedEntryError);
   });
 
+  it('refuses a negative principal even when the totals balance', () => {
+    expect(() =>
+      instalmentEntry({
+        ...meta,
+        entryId: 'E4',
+        instalment: { number: 1, principal: ore(-100), fee: ore(1_100), total: ore(1_000) },
+      }),
+    ).toThrow(UnbalancedEntryError);
+  });
+
   it('every entry balances and a fully repaid loan ends at zero', () => {
     fc.assert(
       fc.property(fc.integer({ min: kr(10_000), max: kr(2_000_000) }), fc.constantFrom(...TERMS), (amount, term) => {

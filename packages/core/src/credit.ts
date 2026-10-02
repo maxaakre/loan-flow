@@ -9,14 +9,17 @@ export const AUTO_LIMIT = kr(1_000_000);
 const CASHFLOW_SHARE = 0.15;
 const AMOUNT_STEP = kr(1_000);
 
-export type DecisionOutcome = 'APPROVED' | 'APPROVED_WITH_CHANGES' | 'DECLINED' | 'MANUAL_REVIEW';
-export type ReasonCode =
-  | 'BANKRUPTCY'
-  | 'PAYMENT_REMARKS'
-  | 'COMPANY_TOO_YOUNG'
-  | 'AMOUNT_ABOVE_AUTO_LIMIT'
-  | 'LOW_CASHFLOW'
-  | 'REGISTRY_UNAVAILABLE';
+export const DECISION_OUTCOMES = ['APPROVED', 'APPROVED_WITH_CHANGES', 'DECLINED', 'MANUAL_REVIEW'] as const;
+export type DecisionOutcome = (typeof DECISION_OUTCOMES)[number];
+export const REASON_CODES = [
+  'BANKRUPTCY',
+  'PAYMENT_REMARKS',
+  'COMPANY_TOO_YOUNG',
+  'AMOUNT_ABOVE_AUTO_LIMIT',
+  'LOW_CASHFLOW',
+  'REGISTRY_UNAVAILABLE',
+] as const;
+export type ReasonCode = (typeof REASON_CODES)[number];
 
 export type CreditInput = Pick<Company, 'ageMonths' | 'avgMonthlyInflow' | 'paymentRemarks' | 'bankrupt'>;
 export type CreditRequest = { amount: Ore; termMonths: TermMonths };
