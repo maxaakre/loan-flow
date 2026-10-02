@@ -9,6 +9,7 @@ import * as subs from 'aws-cdk-lib/aws-sns-subscriptions';
 import type * as sqs from 'aws-cdk-lib/aws-sqs';
 import type { StateMachine } from 'aws-cdk-lib/aws-stepfunctions';
 import { Construct } from 'constructs';
+import { METRICS_NAMESPACE, serviceName } from './functions';
 
 export interface MonitoringProps {
   api: HttpApi;
@@ -18,10 +19,9 @@ export interface MonitoringProps {
   alertEmail: string;
 }
 
-const NAMESPACE = 'LoanFlow';
 const period = Duration.minutes(5);
 const appMetric = (metricName: string, service: string, extra: Record<string, string> = {}, label?: string) =>
-  new cw.Metric({ namespace: NAMESPACE, metricName, dimensionsMap: { service, ...extra }, statistic: 'Sum', period, label });
+  new cw.Metric({ namespace: METRICS_NAMESPACE, metricName, dimensionsMap: { service, ...extra }, statistic: 'Sum', period, label });
 
 export class MonitoringConstruct extends Construct {
   constructor(scope: Construct, id: string, props: MonitoringProps) {
@@ -71,15 +71,15 @@ export class MonitoringConstruct extends Construct {
       new cw.GraphWidget({
         title: 'Credit decisions',
         left: DECISION_OUTCOMES.map((o) =>
-          appMetric('CreditDecisions', 'assess-credit', { outcome: o }, o),
+          appMetric('CreditDecisions', serviceName('steps/assess-credit'), { outcome: o }, o),
         ),
       }),
       new cw.GraphWidget({
         title: 'Money',
         left: [
-          appMetric('ApplicationsSubmitted', 'applications-api'),
-          appMetric('Payouts', 'disburse'),
-          appMetric('PaymentsReceived', 'loans-api'),
+          appMetric('ApplicationsSubmitted', serviceName('handlers/applications-api')),
+          appMetric('Payouts', serviceName('steps/disburse')),
+          appMetric('PaymentsReceived', serviceName('handlers/loans-api')),
         ],
       }),
     );

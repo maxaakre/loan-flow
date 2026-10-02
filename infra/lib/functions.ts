@@ -8,6 +8,10 @@ import { fileURLToPath } from 'node:url';
 
 const srcDir = fileURLToPath(new URL('../../services/api/src/', import.meta.url));
 
+export const METRICS_NAMESPACE = 'LoanFlow';
+/** Powertools service name, and so the `service` metric dimension: the file name of the entry. */
+export const serviceName = (entry: string): string => entry.split('/').pop()!;
+
 export type FnOptions = { timeout?: Duration; environment?: Record<string, string> };
 export type FnFactory = (scope: Construct, id: string, entry: string, opts?: FnOptions) => NodejsFunction;
 
@@ -28,8 +32,8 @@ export const functionFactory =
       }),
       environment: {
         TABLE_NAME: table.tableName,
-        POWERTOOLS_SERVICE_NAME: entry.split('/').pop()!,
-        POWERTOOLS_METRICS_NAMESPACE: 'LoanFlow',
+        POWERTOOLS_SERVICE_NAME: serviceName(entry),
+        POWERTOOLS_METRICS_NAMESPACE: METRICS_NAMESPACE,
         NODE_OPTIONS: '--enable-source-maps',
         ...opts.environment,
       },
